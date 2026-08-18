@@ -1,80 +1,80 @@
-# dsh-mobile-apk — DeepSeek Harness Android Shell APK
+# dsh-mobile-apk — DeepSeek Harness 安卓壳 APK
 
-[🌐 中文说明 / 中文 README](README.zh.md)
+[English README](README.en.md)
 
 ![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-blue?style=flat&logo=DeepSeek&logoSize=auto&color=%232D5F9E)
 ![Android](https://img.shields.io/badge/Android-blue?style=flat&logo=Android&logoSize=auto&color=%2397CA00)
 
 
-> **dsh-mobile 生态** · [dsh-shell-termux](https://github.com/kelai141/dsh-shell-termux)（shell）· [dsh-client-ui-responsive](https://github.com/kelai141/dsh-client-ui-responsive)（移动 UI）· [dsh-host-web-compat](https://github.com/kelai141/dsh-host-web-compat)（浏览器兼容）
+> **dsh-mobile 生态** · [dsh-shell-termux](https://github.com/kelai141/dsh-shell-termux)（shell）· [dsh-client-ui-responsive](https://github.com/kelai141/dsh-client-ui-responsive)（移动 UI）· [dsh-host-web-compat](https://github.com/kelai141/dsh-host-web-compat)（浏览器兼容）· [dsh-mobile](https://github.com/kelai141/dsh-mobile)（协调仓库，private）
 
-Android shell for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): WebView UI
-over an **embedded Termux runtime snapshot** (extract-and-run, no Termux app needed), SAF directory
-bridge, keep-alive foreground service, engine watchdog, and online runtime updates. One APK to
-install: it boots a full dsh web agent that can really execute bash.
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的安卓壳：WebView UI 覆盖
+**内嵌 Termux 运行时快照**（解压即跑，无需 Termux app）、SAF 目录桥、保活前台服务、引擎看门狗、
+运行时在线更新。一个 APK 装完即用：完整的 dsh web agent，且能真实执行 bash。
 
-## Features
+## 功能
 
-- **Embedded runtime** — ships a ~70MB xz snapshot (node + bash + coreutils + dsh + plugins);
-  first launch extracts in ~10s and starts the engine from the app's own files; fully offline.
-- **Mobile UI** — system WebView over `http://127.0.0.1:3080` with the responsive plugin
-  (drawer/sheet on phones).
-- **Keep-alive** — foreground service ("dsh 引擎运行中") + 5s watchdog that restarts a dead engine.
-- **Online runtime updates** — manifest-driven snapshot swap (download → sha256 → atomic switch →
-  auto-restart); the running runtime can update itself without an APK update.
-- **SAF bridge** — `pickDirectory` maps the picked tree to a real path (`/storage/emulated/0/…`).
+- **内嵌运行时**：随包 ~70MB xz 快照（node + bash + coreutils + dsh + 插件）；首启约 10 秒解压、
+  从应用自身目录启动引擎；完全离线；
+- **移动 UI**：系统 WebView 加载 `http://127.0.0.1:3080`，配响应式插件（手机端抽屉/sheet）；
+- **原生壳 UI（Jetpack Compose）**：启动/引导页（引擎状态、进度、可折叠 engine.log、检查更新）
+  与内置控制台（bash 终端）均为原生 Compose 界面，主题随系统深浅色自适应；**不自动进浏览器**——
+  引擎就绪后停引导页，点击「进入」再打开 Web UI；
+- **全面屏（沉浸式）**：WebView 边到边（系统栏透明、刘海屏适配），状态栏 + 导航条默认收起，
+  边缘滑动临时呼出；
+- **保活**：前台服务（"dsh 引擎运行中"）+ 5 秒看门狗（引擎崩溃自动重启）；
+- **在线更新**：manifest 驱动的快照热替换（下载 → sha256 → 原子切换 → 自动重启），
+  运行时可自更新而无需更新 APK；
+- **SAF 桥**：`pickDirectory` 把所选目录映射为真实路径（`/storage/emulated/0/…`）。
 
-## Build
+## 构建
 
-Requirements: JDK 17+, Android SDK (compileSdk 36); Gradle 8.11.1 via wrapper.
+要求：JDK 17+、Android SDK（compileSdk 36）；Gradle 8.11.1 由 wrapper 提供。
 
 ```sh
-# 1. Prepare the runtime snapshot (required, ~70MB, distributed as a Release asset)
-#    Option A: download snapshot-x86_64.tar.xz from GitHub Releases
-#    Option B: build on a Termux device (scripts/make-snapshot.sh) and pull it
+# 1. 准备运行时快照（必须，约 70MB，作为 Release 资产分发）
+#    方式 A：从 GitHub Releases 下载 snapshot-x86_64.tar.xz
+#    方式 B：在 Termux 设备上自打（scripts/make-snapshot.sh）后拉取
 mkdir -p app/src/main/assets
 cp snapshot/snapshot.tar.xz app/src/main/assets/snapshot.tar.xz
 
-# 2. Build (fails loudly when the snapshot is missing)
+# 2. 构建（缺快照会构建失败并提示）
 ./gradlew assembleDebug
-# output: app/build/outputs/apk/debug/app-debug.apk
+# 产物: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Bridge protocol v1 (`window.androidBridge`)
+## 桥协议 v1（`window.androidBridge`）
 
-| method | signature | description |
+| 方法 | 签名 | 说明 |
 |---|---|---|
-| `version` | getter → string | bridge protocol version (`"1.0"`) for feature detection |
-| `checkEngine` | () → string | probes 127.0.0.1:3080; JSON `{running, latencyMs}` |
-| `keepScreenOn` | (enable: boolean) | screen-on wake lock |
-| `showNotification` | (title, text) | test notification channel (POST_NOTIFICATIONS) |
-| `pickDirectory` | (callbackId: string) | SAF tree picker; result async via `window.__dshBridge.onDirectoryPicked(callbackId, path)` |
+| `version` | getter → string | 桥协议版本（`"1.0"`），页面 feature-detect 用 |
+| `checkEngine` | () → string | 探测 127.0.0.1:3080；JSON `{running, latencyMs}` |
+| `keepScreenOn` | (enable: boolean) | 屏幕常亮 |
+| `showNotification` | (title, text) | 通知测试通道（POST_NOTIFICATIONS） |
+| `pickDirectory` | (callbackId: string) | SAF 目录选择；结果经 `window.__dshBridge.onDirectoryPicked(callbackId, path)` 异步回传 |
 
-The bridge decouples the APK from the dsh version: pages feature-detect on `androidBridge.version`.
+桥协议让 APK 与 dsh 版本解耦：页面按 `androidBridge.version` 做特性检测。
 
-## Online update protocol
+## 在线更新协议
 
-1. App fetches `manifest.json`: `{url, sha256, size}` (default `http://10.0.2.2:8899/manifest.json`
-   for emulator testing; production points at a release server);
-2. Downloads the snapshot, verifies SHA-256, extracts to a staging dir (never touching the live tree),
-   atomically swaps `usr` → `usr-old` → new `usr`, then kills the old engine — the watchdog
-   restarts it from the new runtime.
+1. App 拉取 `manifest.json`：`{url, sha256, size}`（默认 `http://10.0.2.2:8899/manifest.json`
+   供模拟器测试；生产指向发布服务器）；
+2. 下载快照 → 校验 SHA-256 → 解压到 staging（不碰线上目录）→ 原子切换 `usr` → 杀掉旧引擎 →
+   看门狗用新运行时重启。
 
-Test trigger: `adb shell am start -n com.dshmobile.shell/.MainActivity -a com.dshmobile.shell.action.UPDATE`;
-status is written to `files/update-status.txt`. Test server: `node scripts/snapshot-server.mjs`.
+测试触发：`adb shell am start -n com.dshmobile.shell/.MainActivity -a com.dshmobile.shell.action.UPDATE`；
+状态写入 `files/update-status.txt`。测试服务器：`node scripts/snapshot-server.mjs`。
 
-## Permissions
+## 权限
 
-`INTERNET` (WebView + engine probe), `POST_NOTIFICATIONS` (notification channel),
-`FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` (keep-alive). SAF picking needs no permission.
+`INTERNET`（WebView + 引擎探测）、`POST_NOTIFICATIONS`（通知通道）、
+`FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC`（保活）。SAF 选择无需权限。
 
-## ABI & pagesize
+## ABI 与页大小
 
-The x86_64 snapshot is verified end-to-end. arm64 snapshots are assembled from the official
-Termux aarch64 repo (see docs/design.md §ABI); a 16KB-page build must be produced on a 16KB device.
-APKs are per-ABI (the snapshot inside is arch-specific).
+x86_64 快照已端到端验证；arm64 快照由官方 Termux aarch64 仓库组装（见 docs/design.md §ABI）；
+16KB 页构建需在 16KB 设备上产出。APK 按 ABI 分发（内含快照与架构绑定）。
 
 ## License
 
-MIT. Contains third-party components under their own licenses (see dependency declarations).
-Design rationale: `docs/design.md`.
+MIT。第三方组件按各自许可（见依赖声明）。设计文档：`docs/design.md`。
