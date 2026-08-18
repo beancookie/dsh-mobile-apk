@@ -14,7 +14,7 @@
 
 ## 功能
 
-- **内嵌运行时**：随包 ~70MB xz 快照（node + bash + coreutils + dsh + 插件）；首启约 10 秒解压、
+- **内嵌运行时**：随包 ~110MB xz 快照（node + bash + coreutils + dsh + 插件）；首启约 10 秒解压、
   从应用自身目录启动引擎；完全离线；
 - **移动 UI**：系统 WebView 加载 `http://127.0.0.1:3080`，配响应式插件（手机端抽屉/sheet）；
 - **原生壳 UI（Jetpack Compose）**：启动/引导页（引擎状态、进度、可折叠 engine.log、检查更新）
@@ -32,16 +32,38 @@
 要求：JDK 17+、Android SDK（compileSdk 36）；Gradle 8.11.1 由 wrapper 提供。
 
 ```sh
-# 1. 准备运行时快照（必须，约 70MB，作为 Release 资产分发）
-#    方式 A：从 GitHub Releases 下载 snapshot-x86_64.tar.xz
+# 1. 准备运行时快照（必须，约 110MB，作为 Release 资产分发）
+#    ABI 命名放入项目根 snapshot/ 目录（不入库）：
+#    方式 A：从 GitHub Releases 下载 snapshot-x86_64.tar.xz / snapshot-arm64.tar.xz
 #    方式 B：在 Termux 设备上自打（scripts/make-snapshot.sh）后拉取
-mkdir -p app/src/main/assets
-cp snapshot/snapshot.tar.xz app/src/main/assets/snapshot.tar.xz
+mkdir -p snapshot
+cp snapshot-x86_64.tar.xz snapshot/
+cp snapshot-arm64.tar.xz snapshot/
 
-# 2. 构建（缺快照会构建失败并提示）
-./gradlew assembleDebug
-# 产物: app/build/outputs/apk/debug/app-debug.apk
+# 2. 构建（按 ABI 显式指定，缺快照会构建失败并提示）
+./gradlew assembleDebug -PsnapshotAbi=x86_64      # 或 arm64
+./gradlew assembleRelease -PsnapshotAbi=arm64
+# 产物: app/build/outputs/apk/{debug,release}/app-{debug,release}.apk
 ```
+
+> `-PsnapshotAbi` 决定打进 APK 的快照（默认 `x86_64`）。构建时自动把
+> `snapshot/snapshot-<abi>.tar.xz` 复制为打包用的 `snapshot.tar.xz`，ABI 切换时自动重打包，
+> 防止错标。Release 签名：本地 `keystore.properties`（不入库）或 CI 环境变量注入；密钥缺失时
+> 产出未签名 APK 并跳过签名，不阻断构建。
+
+## 发布（GitHub Actions 自动）
+
+推送 `v*` tag（或手动 `workflow_dispatch`）即触发 `.github/workflows/release.yml`：
+
+1. 从本仓库最新 Release 取 `snapshot-x86_64.tar.xz` → 构建签名 APK；
+2. 生成 `MANIFEST.txt`（sha256 + 分类路径 + 字节数）与基于 git log 的发布说明；
+3. 创建/更新 GitHub Release，附 APK、快照、MANIFEST、notes。
+
+手动发布亦可（如本仓库 v0.12.2 双 ABI）：构建对应 ABI 的 `assembleRelease -PsnapshotAbi=<abi>`，
+用 `gh release create <tag>` 上传 APK + `snapshot-<abi>.tar.xz` + 插件 + MANIFEST + notes。
+
+CI 签名密钥通过仓库 secrets 注入：`ANDROID_KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` /
+`KEY_ALIAS` / `KEY_PASSWORD`。
 
 ## 桥协议 v1（`window.androidBridge`）
 
@@ -72,8 +94,9 @@ cp snapshot/snapshot.tar.xz app/src/main/assets/snapshot.tar.xz
 
 ## ABI 与页大小
 
-x86_64 快照已端到端验证；arm64 快照由官方 Termux aarch64 仓库组装（见 docs/design.md §ABI）；
-16KB 页构建需在 16KB 设备上产出。APK 按 ABI 分发（内含快照与架构绑定）。
+Release 按 ABI 双端分发：`x86_64` 快照已端到端验证（MuMu/真机）；`arm64-v8a` 快照由官方
+Termux aarch64 仓库组装（见 docs/design.md §ABI）。构建时用 `-PsnapshotAbi=<abi>` 选定；
+16KB 页构建需在 16KB 设备上产出。APK 内含快照，与架构绑定。
 
 ## License
 

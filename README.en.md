@@ -15,7 +15,7 @@ install: it boots a full dsh web agent that can really execute bash.
 
 ## Features
 
-- **Embedded runtime** — ships a ~70MB xz snapshot (node + bash + coreutils + dsh + plugins);
+- **Embedded runtime** — ships a ~110MB xz snapshot (node + bash + coreutils + dsh + plugins);
   first launch extracts in ~10s and starts the engine from the app's own files; fully offline.
 - **Mobile UI** — system WebView over `http://127.0.0.1:3080` with the responsive plugin
   (drawer/sheet on phones).
@@ -35,16 +35,39 @@ install: it boots a full dsh web agent that can really execute bash.
 Requirements: JDK 17+, Android SDK (compileSdk 36); Gradle 8.11.1 via wrapper.
 
 ```sh
-# 1. Prepare the runtime snapshot (required, ~70MB, distributed as a Release asset)
-#    Option A: download snapshot-x86_64.tar.xz from GitHub Releases
+# 1. Prepare the runtime snapshot (required, ~110MB, distributed as a Release asset)
+#    Drop ABI-named files into the project-root snapshot/ dir (gitignored):
+#    Option A: download snapshot-x86_64.tar.xz / snapshot-arm64.tar.xz from GitHub Releases
 #    Option B: build on a Termux device (scripts/make-snapshot.sh) and pull it
-mkdir -p app/src/main/assets
-cp snapshot/snapshot.tar.xz app/src/main/assets/snapshot.tar.xz
+mkdir -p snapshot
+cp snapshot-x86_64.tar.xz snapshot/
+cp snapshot-arm64.tar.xz snapshot/
 
-# 2. Build (fails loudly when the snapshot is missing)
-./gradlew assembleDebug
-# output: app/build/outputs/apk/debug/app-debug.apk
+# 2. Build (ABI is explicit; fails loudly when the snapshot is missing)
+./gradlew assembleDebug -PsnapshotAbi=x86_64      # or arm64
+./gradlew assembleRelease -PsnapshotAbi=arm64
+# output: app/build/outputs/apk/{debug,release}/app-{debug,release}.apk
 ```
+
+> `-PsnapshotAbi` selects which snapshot is embedded (default `x86_64`). The build copies
+> `snapshot/snapshot-<abi>.tar.xz` to the packaged `snapshot.tar.xz` and rebuilds on ABI switches,
+> preventing mislabeled releases. Release signing: local `keystore.properties` (gitignored) or CI
+> environment variables; if the key is absent the APK is built unsigned without failing.
+
+## Releases (GitHub Actions)
+
+Pushing a `v*` tag (or a manual `workflow_dispatch`) triggers `.github/workflows/release.yml`:
+
+1. Pulls `snapshot-x86_64.tar.xz` from the latest existing Release, then builds the signed APK;
+2. Generates `MANIFEST.txt` (sha256 + categorized path + size) and release notes from git log;
+3. Creates/updates a GitHub Release with APK, snapshot, MANIFEST and notes.
+
+Manual publishing is also possible (e.g. the dual-ABI v0.12.2): build each ABI with
+`assembleRelease -PsnapshotAbi=<abi>`, then `gh release create <tag>` and upload the APKs,
+`snapshot-<abi>.tar.xz`, plugins, MANIFEST and notes.
+
+CI signing keys are injected via repository secrets: `ANDROID_KEYSTORE_BASE64` /
+`KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`.
 
 ## Bridge protocol v1 (`window.androidBridge`)
 
@@ -76,9 +99,10 @@ status is written to `files/update-status.txt`. Test server: `node scripts/snaps
 
 ## ABI & pagesize
 
-The x86_64 snapshot is verified end-to-end. arm64 snapshots are assembled from the official
-Termux aarch64 repo (see docs/design.md §ABI); a 16KB-page build must be produced on a 16KB device.
-APKs are per-ABI (the snapshot inside is arch-specific).
+Releases ship both ABIs: `x86_64` is verified end-to-end (MuMu/real device); `arm64-v8a` is assembled
+from the official Termux aarch64 repo (see docs/design.md §ABI). Pick the ABI at build time with
+`-PsnapshotAbi=<abi>`. A 16KB-page build must be produced on a 16KB device. Each APK embeds its
+snapshot, so APKs are arch-specific.
 
 ## License
 
