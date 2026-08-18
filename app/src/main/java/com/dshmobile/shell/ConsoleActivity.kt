@@ -31,11 +31,8 @@ class ConsoleActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     // 沉浸式：内容延伸到系统栏（键盘弹出仍由 manifest adjustResize 处理）。
     WindowCompat.setDecorFitsSystemWindows(window, false)
-    // 原生页面固定浅色背景：系统栏图标用深色。
-    WindowInsetsControllerCompat(window, window.decorView).apply {
-      isAppearanceLightStatusBars = true
-      isAppearanceLightNavigationBars = true
-    }
+    // 系统栏图标颜色跟随系统深浅。
+    applySystemBarsAppearance()
     setContent {
       DshTheme {
         ConsoleScreen(
@@ -69,6 +66,23 @@ class ConsoleActivity : ComponentActivity() {
   override fun onDestroy() {
     session.destroy()
     super.onDestroy()
+  }
+
+  override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+    super.onConfigurationChanged(newConfig)
+    // uiMode 切换：系统栏图标跟随深浅（Compose 侧自动重组合）。
+    applySystemBarsAppearance()
+  }
+
+  /** 系统栏图标颜色跟随系统深浅（浅色背景深图标，深色背景浅图标）。 */
+  private fun applySystemBarsAppearance() {
+    val night = (resources.configuration.uiMode and
+      android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+      android.content.res.Configuration.UI_MODE_NIGHT_YES
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = !night
+      isAppearanceLightNavigationBars = !night
+    }
   }
 
   /** 输出上限（字符数）：超出时从最近换行处裁掉旧内容，防无界增长卡顿。 */

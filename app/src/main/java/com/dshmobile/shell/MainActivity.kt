@@ -67,6 +67,10 @@ class MainActivity : ComponentActivity() {
   private var crashInfo: String? = null
   /** 引擎页是否已加载（首次进入 WebView 才 loadUrl，避免引擎未就绪时渲染错误页）。 */
   private var webLoaded = false
+  /** 引擎已就绪（引导页主按钮变为「进入」，由用户主动进入 Web UI，不自动跳）。 */
+  private var engineReady by mutableStateOf(false)
+  /** 用户已进入过 Web UI：此后引擎崩溃恢复时监控才允许自动切回 WebView。 */
+  private var webActivated = false
   /** 重启引擎 in-flight 守卫（防连点双杀双启）。 */
   private val engineRestarting = java.util.concurrent.atomic.AtomicBoolean(false)
   /** 前台引擎监控：3s 轮询探测，down→测试界面、up→恢复 WebUI
@@ -80,8 +84,10 @@ class MainActivity : ComponentActivity() {
           if (!::webView.isInitialized || !::guideView.isInitialized) return@runOnUiThread
           if (!running && webView.visibility == View.VISIBLE) {
             engineStatusText = "引擎未运行，正在自动恢复…"
+            engineReady = false
             showGuide()
-          } else if (running && guideView.visibility == View.VISIBLE) {
+          } else if (running && guideView.visibility == View.VISIBLE && webActivated) {
+            // 仅用户已进入过 Web UI 时才自动切回；未进入过则停在引导页等用户点击。
             showWeb()
           }
         }
@@ -365,11 +371,8 @@ class MainActivity : ComponentActivity() {
       window.attributes.layoutInDisplayCutoutMode =
         android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
     }
-    // 原生页面固定浅色背景：系统栏图标用深色（状态栏收起时不影响 WebView）。
-    WindowInsetsControllerCompat(window, window.decorView).apply {
-      isAppearanceLightStatusBars = true
-      isAppearanceLightNavigationBars = true
-    }
+    // 系统栏图标颜色跟随系统深浅（浅色背景深图标，深色背景浅图标）。
+    applySystemBarsAppearance()
     applyImmersive(immersivePrefs())
     // 浏览器完全 View 化：WebView 是 root FrameLayout 里的普通 View，
     // 与 HEAD 同构；引导页是 ComposeView（Compose 渲染的 View），仅负责壳 UI。
@@ -386,6 +389,8 @@ class MainActivity : ComponentActivity() {
             progressText = progressText,
             crashBanner = crashBannerText,
             logSummary = logSummaryText,
+            engineReady = engineReady,
+            onEnterWeb = { showWeb() },
             onOpenConsole = { startActivity(Intent(this@MainActivity, ConsoleActivity::class.java)) },
             onRetry = { startEngineFlow() },
             onUpdate = {
@@ -526,7 +531,26 @@ class MainActivity : ComponentActivity() {
 
   override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
     super.onConfigurationChanged(newConfig)
+    // uiMode 切换：系统栏图标 + 进度条主色跟随深浅（Compose 侧自动重组合）。
+    applySystemBarsAppearance()
     pushSystemDark(webView)
+  }
+
+  /** 系统栏图标颜色跟随系统深浅（浅色背景深图标，深色背景浅图标）。 */
+  private fun applySystemBarsAppearance() {
+    val night = (resources.configuration.uiMode and
+      android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+      android.content.res.Configuration.UI_MODE_NIGHT_YES
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = !night
+      isAppearanceLightNavigationBars = !night
+    }
+    // WebView 加载进度条主色随深浅切换（与 Compose primary 一致）。
+    if (::webProgressBar.isInitialized) {
+      webProgressBar.progressTintList = android.content.res.ColorStateList.valueOf(
+        if (night) 0xFF79B8FF.toInt() else 0xFF2D5F9E.toInt(),
+      )
+    }
   }
 
   override fun onBackPressed() {
@@ -1105,6 +1129,8 @@ class MainActivity : ComponentActivity() {
     }
     try { engineManager.stopEngine() } catch (_: Exception) {
     }
+    webActivated = false
+    engineReady = false
     showGuide()
     LogCollector.log("dsh-shell", "harness closed via dev options (shutdownToGuide)")
   }
@@ -1121,7 +1147,12 @@ class MainActivity : ComponentActivity() {
     Thread {
       try {
       if (EngineProbe.check().optBoolean("running", false)) {
-        runOnUiThread { showWeb() }
+        // 引擎已在运行：停引导页显示就绪态，由用户点击「进入」（不自动跳浏览器）。
+        runOnUiThread {
+          engineStatusText = "引擎已就绪，可以开始使用"
+          engineReady = true
+          showGuide()
+        }
         return@Thread
       }
       // 启动即有反馈：进入测试界面显示"正在启动引擎…"（不再白屏等 probe）。
@@ -1129,6 +1160,7 @@ class MainActivity : ComponentActivity() {
         progressBarVisible = false
         progressText = ""
         engineStatusText = "正在启动引擎…"
+        engineReady = false
         showGuide()
       }
       if (!engineManager.snapshotFresh()) {
@@ -1174,7 +1206,14 @@ class MainActivity : ComponentActivity() {
         if (EngineProbe.check().optBoolean("running", false)) {
           startEngineService()
           applyShizukuKeepAlive()
-          runOnUiThread { showWeb() }
+          // 就绪后停引导页，主按钮变为「进入」，由用户主动进入 Web UI。
+          runOnUiThread {
+            progressBarVisible = false
+            progressText = ""
+            engineStatusText = "引擎已就绪，可以开始使用"
+            engineReady = true
+            showGuide()
+          }
           return@Thread
         }
         Thread.sleep(1000)
@@ -1234,6 +1273,9 @@ class MainActivity : ComponentActivity() {
     guideView.visibility = View.GONE
     webProgressBar.visibility = View.GONE
     webView.visibility = View.VISIBLE
+    // 用户已进入 Web UI：此后引擎崩溃恢复时监控可自动切回。
+    webActivated = true
+    engineReady = false
     // 首次进入才真正加载引擎页（此刻引擎已应答，不会再现错误页）；
     // 之后为引擎恢复场景，reload 拿到新会话页面。
     if (!webLoaded) {

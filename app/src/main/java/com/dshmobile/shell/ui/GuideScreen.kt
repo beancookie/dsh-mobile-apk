@@ -1,5 +1,6 @@
 package com.dshmobile.shell.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +25,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,8 +48,9 @@ import com.dshmobile.shell.ui.theme.splashBrush
  * WebView 兄弟节点由 View 可见性切换）。浏览器（WebView）完全 View 化，
  * 不进入 Compose 组合，避免 OEM WebView 在 Compose 布局下的渲染异常。
  *
- * 2026-08-18：浅色卡片式布局——渐变背景 + 居中圆角卡片（限宽，平板不拉宽），
- * 主操作「重试」全宽主按钮，次要操作等宽次按钮行。
+ * 浅色卡片式布局：渐变背景 + 居中圆角卡片（限宽，平板不拉宽）。
+ * 引擎就绪后不再自动跳进 WebView——主按钮变为「进入」由用户主动进入；
+ * 失败时主按钮为「重试」。engine.log 摘要默认折叠，点击展开。
  */
 @Composable
 fun GuideScreen(
@@ -54,6 +59,8 @@ fun GuideScreen(
   progressText: String,
   crashBanner: String?,
   logSummary: String?,
+  engineReady: Boolean,
+  onEnterWeb: () -> Unit,
   onOpenConsole: () -> Unit,
   onRetry: () -> Unit,
   onUpdate: () -> Unit,
@@ -147,28 +154,58 @@ fun GuideScreen(
         }
         logSummary?.let { summary ->
           Spacer(Modifier.height(16.dp))
+          // 日志默认折叠：内容变化时重置回折叠态，点击标题行展开/收起。
+          var logExpanded by remember(summary) { mutableStateOf(false) }
           Surface(
+            onClick = { logExpanded = !logExpanded },
             shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             modifier = Modifier.fillMaxWidth(),
           ) {
-            Text(
-              text = summary,
-              style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(12.dp),
-            )
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                  text = "运行日志",
+                  style = MaterialTheme.typography.labelLarge,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.weight(1f),
+                )
+                Text(
+                  text = if (logExpanded) "收起 ▴" else "展开 ▾",
+                  style = MaterialTheme.typography.labelMedium,
+                  color = MaterialTheme.colorScheme.primary,
+                )
+              }
+              AnimatedVisibility(visible = logExpanded) {
+                Text(
+                  text = summary,
+                  style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.padding(top = 8.dp),
+                )
+              }
+            }
           }
         }
         Spacer(Modifier.height(24.dp))
-        // 主操作全宽；次要操作等宽一行，避免小屏三键挤压换行。
-        Button(
-          onClick = onRetry,
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        ) { Text("重试") }
+        // 主操作全宽：引擎就绪 → 进入 Web UI；未就绪/失败 → 重试。
+        if (engineReady) {
+          Button(
+            onClick = onEnterWeb,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(48.dp),
+          ) { Text("进入 DeepSeek Harness") }
+        } else {
+          Button(
+            onClick = onRetry,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(48.dp),
+          ) { Text("重试") }
+        }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
           OutlinedButton(

@@ -2,8 +2,8 @@ package com.dshmobile.shell.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Compose 语义色板（与 res/values/colors.xml 同色值；原生主题只负责窗口/系统栏）。
-// 原生页面固定浅色（2026-08-18：不再跟随系统 uiMode 切换深色），深色常量保留备用。
+// Compose 语义色板（与 res/values(-night)/themes.xml 同色值；原生主题只负责
+// 窗口/系统栏，Compose 侧用本表 + MaterialTheme 深浅色随系统切换）。
 
 // 浅色
 val DshAccentLight = Color(0xFF2D5F9E)
