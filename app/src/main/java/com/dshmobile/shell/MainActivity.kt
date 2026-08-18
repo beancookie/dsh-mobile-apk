@@ -25,19 +25,22 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.dshmobile.shell.ui.GuideScreen
+import com.dshmobile.shell.ui.theme.DshTheme
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -46,18 +49,24 @@ import java.net.URL
 class MainActivity : ComponentActivity() {
 
   private lateinit var webView: WebView
-  private lateinit var guideView: LinearLayout
+  /** 引导页（Compose 渲染的普通 View，与 WebView 兄弟节点，按 View 可见性切换）。 */
+  private lateinit var guideView: ComposeView
+  /** WebView 引擎页加载指示（顶部细进度条 View，页面就绪后隐藏）。 */
+  private lateinit var webProgressBar: ProgressBar
   /** 目录选择桥鉴权 token（进程级共享：MainActivity 重建/看门狗重启不更换，
    *  与引擎 env 的 DSH_PICK_TOKEN 始终一致；C1 修复）。 */
   private val pickToken: String = EngineManager.ensurePickToken()
-  private lateinit var engineStatus: TextView
-  private lateinit var progressText: TextView
-  /** 启动/测试双态界面（v0.11.0）：解压进度条、崩溃横幅、engine.log 摘要。 */
-  private lateinit var progressBar: ProgressBar
-  private lateinit var crashBanner: TextView
-  private lateinit var logSummary: TextView
+
+  // —— 引导页 Compose 状态（后台线程可直接写，快照线程安全）。——
+  private var engineStatusText by mutableStateOf("")
+  private var progressBarVisible by mutableStateOf(false)
+  private var progressText by mutableStateOf("")
+  private var crashBannerText by mutableStateOf<String?>(null)
+  private var logSummaryText by mutableStateOf<String?>(null)
   /** 崩溃标记：记录未捕获异常摘要，下次启动测试界面提示（不吞异常）。 */
   private var crashInfo: String? = null
+  /** 引擎页是否已加载（首次进入 WebView 才 loadUrl，避免引擎未就绪时渲染错误页）。 */
+  private var webLoaded = false
   /** 重启引擎 in-flight 守卫（防连点双杀双启）。 */
   private val engineRestarting = java.util.concurrent.atomic.AtomicBoolean(false)
   /** 前台引擎监控：3s 轮询探测，down→测试界面、up→恢复 WebUI
@@ -70,7 +79,7 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
           if (!::webView.isInitialized || !::guideView.isInitialized) return@runOnUiThread
           if (!running && webView.visibility == View.VISIBLE) {
-            engineStatus.text = "引擎未运行，正在自动恢复…"
+            engineStatusText = "引擎未运行，正在自动恢复…"
             showGuide()
           } else if (running && guideView.visibility == View.VISIBLE) {
             showWeb()
@@ -341,15 +350,67 @@ class MainActivity : ComponentActivity() {
       LogCollector.start(this)
       LogCollector.log("dsh-shell", "app onCreate (dev log on)")
     }
-    // 沉浸式：内容延伸到系统栏区域（状态栏常态收起，边缘滑动临时呼出）。
+    // 沉浸式：内容延伸到系统栏区域（系统栏常态收起，边缘滑动临时呼出）。
     WindowCompat.setDecorFitsSystemWindows(window, false)
+    // 全面屏：系统栏透明且不加对比度遮罩（否则底部导航条是不透明黑条，
+    // 顶部状态栏透出深色），WebView 内容真正铺满屏幕。
+    window.statusBarColor = android.graphics.Color.TRANSPARENT
+    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+    if (Build.VERSION.SDK_INT >= 29) {
+      window.isStatusBarContrastEnforced = false
+      window.isNavigationBarContrastEnforced = false
+    }
+    // 刘海/挖孔屏：允许内容延伸到刘海区域（默认 default 模式会在顶部留黑边）。
+    if (Build.VERSION.SDK_INT >= 28) {
+      window.attributes.layoutInDisplayCutoutMode =
+        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+    }
+    // 原生页面固定浅色背景：系统栏图标用深色（状态栏收起时不影响 WebView）。
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = true
+      isAppearanceLightNavigationBars = true
+    }
     applyImmersive(immersivePrefs())
+    // 浏览器完全 View 化：WebView 是 root FrameLayout 里的普通 View，
+    // 与 HEAD 同构；引导页是 ComposeView（Compose 渲染的 View），仅负责壳 UI。
     val root = FrameLayout(this)
     webView = WebView(this).apply { id = View.generateViewId() }
     root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-    guideView = buildGuideView()
+    guideView = ComposeView(this).apply {
+      visibility = View.GONE
+      setContent {
+        DshTheme {
+          GuideScreen(
+            engineStatusText = engineStatusText,
+            progressBarVisible = progressBarVisible,
+            progressText = progressText,
+            crashBanner = crashBannerText,
+            logSummary = logSummaryText,
+            onOpenConsole = { startActivity(Intent(this@MainActivity, ConsoleActivity::class.java)) },
+            onRetry = { startEngineFlow() },
+            onUpdate = {
+              UpdateManager(this@MainActivity).checkAndApply { status -> engineStatusText = status }
+            },
+          )
+        }
+      }
+    }
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    // WebView 加载指示：顶部细进度条，仅引擎页可见时显示。
+    webProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+      max = 100
+      progressTintList = android.content.res.ColorStateList.valueOf(
+        ContextCompat.getColor(this@MainActivity, R.color.dsh_accent),
+      )
+      visibility = View.GONE
+      layoutParams = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, (3 * resources.displayMetrics.density).toInt(),
+        android.view.Gravity.TOP,
+      )
+    }
+    root.addView(webProgressBar)
     setContentView(root)
+    // WebView 已挂载后配置 + 加载（末尾 loadUrl），与 HEAD「先挂载再加载」一致。
     configureWebView()
     // Testable update trigger: adb am start -n .../.MainActivity -a com.dshmobile.shell.action.UPDATE
     if (intent?.action == ACTION_UPDATE) {
@@ -411,24 +472,26 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  /** 状态栏常态收起（沉浸式）：隐藏系统栏，边缘滑动临时呼出后自动收起。 */
+  /** 全面屏（沉浸式）：状态栏 + 导航条常态收起，边缘滑动临时呼出后自动收起。 */
   private fun applyImmersive(enabled: Boolean) {
     try {
       if (Build.VERSION.SDK_INT >= 30) {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (enabled) {
-          controller.hide(WindowInsetsCompat.Type.statusBars())
+          controller.hide(WindowInsetsCompat.Type.systemBars())
           controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
-          controller.show(WindowInsetsCompat.Type.statusBars())
+          controller.show(WindowInsetsCompat.Type.systemBars())
         }
       } else {
         val flags = if (enabled) {
           View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         } else {
           0
         }
@@ -514,7 +577,14 @@ class MainActivity : ComponentActivity() {
       }
 
       override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
-        if (isEngineSource(failingUrl)) showGuide()
+        if (isEngineSource(failingUrl)) {
+          // 立即清掉「网络无法访问」错误页：错误页残留在 WebView 里，下次
+          // 切回时会先闪现再被新页面覆盖。清成空白页并标记未加载，恢复时
+          // 由 showWeb 重新 loadUrl。
+          webLoaded = false
+          view.loadUrl("about:blank")
+          showGuide()
+        }
       }
 
       override fun onPageFinished(view: WebView, url: String) {
@@ -532,6 +602,17 @@ class MainActivity : ComponentActivity() {
       downloadToDownloads(url, contentDisposition)
     }
     webView.webChromeClient = object : WebChromeClient() {
+      override fun onProgressChanged(view: WebView, newProgress: Int) {
+        // 引擎页加载进度指示（仅观察，不改浏览器行为）：引擎页可见且
+        // 0<progress<100 时显示顶部细条，就绪/离开隐藏。
+        if (webView.visibility == View.VISIBLE && newProgress in 1 until 100) {
+          webProgressBar.visibility = View.VISIBLE
+          webProgressBar.progress = newProgress
+        } else {
+          webProgressBar.visibility = View.GONE
+        }
+      }
+
       override fun onShowFileChooser(
         webView: WebView, filePathCallback: ValueCallback<Array<Uri>>, fileChooserParams: FileChooserParams,
       ): Boolean {
@@ -604,7 +685,8 @@ class MainActivity : ComponentActivity() {
       ),
       "androidBridge",
     )
-    webView.loadUrl(EngineProbe.ENGINE_URL)
+    // 不在此处 loadUrl：引擎通常尚未就绪，过早加载只会渲染「网络无法访问」
+    // 错误页（之后切回 WebView 时闪现）。首次加载推迟到 showWeb（引擎已应答）。
   }
 
   /**
@@ -1016,97 +1098,6 @@ class MainActivity : ComponentActivity() {
     )
   }
 
-  private fun buildGuideView(): LinearLayout {
-    val density = resources.displayMetrics.density
-    val pad = (24 * density).toInt()
-    val guide = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(pad, pad, pad, pad)
-      gravity = android.view.Gravity.CENTER
-      visibility = View.GONE
-    }
-    // logo + 标题：启动/测试双态界面的固定头部。
-    val icon = ImageView(this).apply {
-      setImageResource(R.mipmap.ic_launcher)
-      layoutParams = LinearLayout.LayoutParams((64 * density).toInt(), (64 * density).toInt())
-    }
-    val title = TextView(this).apply {
-      text = "DeepSeek Harness"
-      textSize = 20f
-      setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
-      gravity = android.view.Gravity.CENTER
-    }
-    // 上次异常退出横幅（崩溃标记存在时显示）。
-    crashBanner = TextView(this).apply {
-      textSize = 12f
-      setTextColor(0xFFF85149.toInt())
-      setPadding(0, (6 * density).toInt(), 0, (10 * density).toInt())
-      gravity = android.view.Gravity.CENTER
-      visibility = View.GONE
-    }
-    engineStatus = TextView(this).apply { textSize = 16f; setPadding(0, 0, 0, pad); gravity = android.view.Gravity.CENTER }
-    // 解压/更新进度条（仅快照刷新时可见）。
-    progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-      visibility = View.GONE
-      layoutParams = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, (6 * density).toInt(),
-      )
-    }
-    progressText = TextView(this).apply {
-      textSize = 13f
-      setPadding(0, (8 * density).toInt(), 0, pad)
-      gravity = android.view.Gravity.CENTER
-      visibility = View.GONE
-    }
-    // 失败诊断：engine.log 尾部摘要（测试界面排查用）。
-    logSummary = TextView(this).apply {
-      textSize = 11f
-      setPadding(0, 0, 0, pad)
-      gravity = android.view.Gravity.CENTER
-      visibility = View.GONE
-    }
-    val openConsole = Button(this).apply {
-      text = "打开控制台"
-      setOnClickListener { startActivity(Intent(this@MainActivity, ConsoleActivity::class.java)) }
-    }
-    val retry = Button(this).apply {
-      text = "重试"
-      setOnClickListener { startEngineFlow() }
-    }
-    val update = Button(this).apply {
-      text = "检查运行时更新"
-      setOnClickListener {
-        UpdateManager(this@MainActivity).checkAndApply { status ->
-          runOnUiThread { engineStatus.text = status }
-        }
-      }
-    }
-    fun buttonRow(vararg buttons: Button): LinearLayout {
-      val row = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = android.view.Gravity.CENTER
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.setMargins(0, 0, 0, (10 * density).toInt())
-        layoutParams = lp
-      }
-      for (b in buttons) {
-        val blp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        blp.setMargins((6 * density).toInt(), 0, (6 * density).toInt(), 0)
-        row.addView(b, blp)
-      }
-      return row
-    }
-    guide.addView(icon)
-    guide.addView(title)
-    guide.addView(crashBanner)
-    guide.addView(engineStatus)
-    guide.addView(progressBar)
-    guide.addView(progressText)
-    guide.addView(logSummary)
-    guide.addView(buttonRow(openConsole, retry, update))
-    return guide
-  }
-
   /** 开发者选项「关闭」：停止引擎并回退到初始化（启动/测试）界面，不自动重启。 */
   private fun shutdownToGuide() {
     EngineService.userShutdown = true
@@ -1135,42 +1126,48 @@ class MainActivity : ComponentActivity() {
       }
       // 启动即有反馈：进入测试界面显示"正在启动引擎…"（不再白屏等 probe）。
       runOnUiThread {
-        progressBar.visibility = View.GONE
-        progressText.visibility = View.GONE
-        engineStatus.text = "正在启动引擎…"
+        progressBarVisible = false
+        progressText = ""
+        engineStatusText = "正在启动引擎…"
         showGuide()
       }
       if (!engineManager.snapshotFresh()) {
         runOnUiThread {
-          progressBar.visibility = View.VISIBLE
-          progressText.visibility = View.VISIBLE
-          engineStatus.text = "正在更新运行时（约 70MB）…"
+          progressBarVisible = true
+          progressText = "正在更新运行时（约 70MB）…"
+          engineStatusText = "正在更新运行时（约 70MB）…"
         }
         val ok = engineManager.refreshSnapshot { done, total ->
           runOnUiThread {
             // done 是解压后字节数，total 是压缩包字节数，口径不一致；只显示已解压量。
-            engineStatus.text = "正在更新运行时… " + done / 1024 / 1024 + " MB"
+            engineStatusText = "正在更新运行时… " + done / 1024 / 1024 + " MB"
           }
         }
         if (!ok) {
           runOnUiThread {
-            engineStatus.text = "运行时更新失败，请重试。"
+            engineStatusText = "运行时更新失败，请重试。"
             showGuide()
           }
           return@Thread
         }
         runOnUiThread {
-          progressBar.visibility = View.GONE
-          progressText.visibility = View.GONE
-          engineStatus.text = "正在启动引擎…"
+          progressBarVisible = false
+          progressText = ""
+          engineStatusText = "正在启动引擎…"
         }
       }
       if (!engineManager.startEngine()) {
         runOnUiThread {
-          engineStatus.text = "引擎启动失败，请重试。"
+          engineStatusText = "引擎启动失败，请重试。"
           showGuide()
         }
         return@Thread
+      }
+      // 启动轮询期间显示 indeterminate 进度（首次冷启动 20-45s）。
+      runOnUiThread {
+        progressBarVisible = true
+        progressText = "正在启动引擎（首次约 20-45 秒）…"
+        engineStatusText = "正在启动引擎…"
       }
       // Poll up to 30s for the web service.
       for (i in 0..30) {
@@ -1183,7 +1180,9 @@ class MainActivity : ComponentActivity() {
         Thread.sleep(1000)
       }
       runOnUiThread {
-        engineStatus.text = "引擎启动超时，请重试。"
+        progressBarVisible = false
+        progressText = ""
+        engineStatusText = "引擎启动超时，请重试。"
         showGuide()
       }
       } finally {
@@ -1198,8 +1197,9 @@ class MainActivity : ComponentActivity() {
     val manager = UpdateManager(this)
     manager.checkAndApply { status ->
       runOnUiThread {
-        engineStatus.text = status
-        progressText.visibility = View.VISIBLE
+        engineStatusText = status
+        progressText = status
+        progressBarVisible = true
         guideView.visibility = View.VISIBLE
         webView.visibility = View.GONE
       }
@@ -1232,28 +1232,26 @@ class MainActivity : ComponentActivity() {
 
   private fun showWeb() {
     guideView.visibility = View.GONE
+    webProgressBar.visibility = View.GONE
     webView.visibility = View.VISIBLE
-    // The WebView may have rendered an error page before the engine was
-    // ready (engine boot takes seconds); reload now that it answers.
-    webView.reload()
+    // 首次进入才真正加载引擎页（此刻引擎已应答，不会再现错误页）；
+    // 之后为引擎恢复场景，reload 拿到新会话页面。
+    if (!webLoaded) {
+      webLoaded = true
+      webView.loadUrl(EngineProbe.ENGINE_URL)
+    } else {
+      webView.reload()
+    }
   }
 
   /** 进入测试界面（引擎失败/未就绪回退）：状态 + 崩溃横幅 + engine.log 摘要。 */
   private fun showGuide() {
     webView.visibility = View.GONE
+    webProgressBar.visibility = View.GONE
     guideView.visibility = View.VISIBLE
-    val crash = crashInfo
-    if (crash != null) {
-      crashBanner.visibility = View.VISIBLE
-      crashBanner.text = "上次异常退出：$crash"
-    }
+    crashBannerText = crashInfo?.let { "上次异常退出：$it" }
     val tail = tailEngineLog(8)
-    if (tail.isNotEmpty()) {
-      logSummary.visibility = View.VISIBLE
-      logSummary.text = "engine.log 末尾：\n$tail"
-    } else {
-      logSummary.visibility = View.GONE
-    }
+    logSummaryText = if (tail.isNotEmpty()) "engine.log 末尾：\n$tail" else null
   }
 
   /** engine.log 尾部摘要（测试界面诊断用；缺失/不可读返回空）。 */

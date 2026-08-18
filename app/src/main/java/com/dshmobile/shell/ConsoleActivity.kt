@@ -1,61 +1,51 @@
 package com.dshmobile.shell
 
 import android.os.Bundle
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.JavascriptInterface
-import android.webkit.WebSettings
-import android.webkit.WebView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.dshmobile.shell.ui.ConsoleScreen
+import com.dshmobile.shell.ui.theme.DshTheme
 
 /**
- * 内置控制台：WebView 加载 assets/console.html（终端样式 UI），
+ * 内置控制台：Compose 原生终端界面（状态栏 + 输出区 + 命令输入行），
  * ConsoleSession spawn 快照 bash（env 与引擎一致）→ stdin 管道写命令、
- * 输出经 consoleBridge JS 接口回 UI。引擎未运行时也可用（排查场景）。
+ * 输出经 Listener 回调追加到 Compose 状态。引擎未运行时也可用（排查场景）。
  */
 class ConsoleActivity : ComponentActivity() {
 
-  private lateinit var webView: WebView
   private val session = ConsoleSession(this)
   private val handler = android.os.Handler(android.os.Looper.getMainLooper())
   private var sessionStarted = false
 
-  /** 最近状态文案（onPageFinished 重推用；页面加载前丢失的状态补投）。 */
-  private var lastStatus: String? = null
-
-  /** 状态推送（主线程调用）。 */
-  private fun pushStatus(text: String) {
-    webView.evaluateJavascript("window.__consoleStatus(" + jsString(text) + ")", null)
-  }
+  /** 状态文案（启动/退出），Compose 状态。 */
+  private var consoleStatus by mutableStateOf("启动中…")
+  /** 终端输出缓冲（capped），Compose 状态。 */
+  private var output by mutableStateOf("")
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    webView = WebView(this).apply {
-      id = View.generateViewId()
-      layoutParams = ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-      )
+    // 沉浸式：内容延伸到系统栏（键盘弹出仍由 manifest adjustResize 处理）。
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    // 原生页面固定浅色背景：系统栏图标用深色。
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = true
+      isAppearanceLightNavigationBars = true
     }
-    webView.settings.apply {
-      javaScriptEnabled = true
-      domStorageEnabled = true
-      allowFileAccess = false
-      if (android.os.Build.VERSION.SDK_INT >= 29) {
-        @Suppress("DEPRECATION")
-        forceDark = WebSettings.FORCE_DARK_AUTO
+    setContent {
+      DshTheme {
+        ConsoleScreen(
+          consoleStatus = consoleStatus,
+          output = output,
+          onSubmit = { session.writeCommand(it) },
+          onClear = { output = "" },
+        )
       }
     }
-    // 页面加载完成后重推状态：bash 可能在 onStart 就绪而 console.html
-    // 的 JS 桥晚于其才定义，早到的 evaluateJavascript 会静默丢失。
-    webView.webViewClient = object : android.webkit.WebViewClient() {
-      override fun onPageFinished(view: android.webkit.WebView, url: String) {
-        super.onPageFinished(view, url)
-        lastStatus?.let { pushStatus(it) }
-      }
-    }
-    webView.addJavascriptInterface(ConsoleBridge(), "consoleBridge")
-    setContentView(webView)
-    webView.loadUrl("file:///android_asset/console.html")
   }
 
   override fun onStart() {
@@ -63,40 +53,34 @@ class ConsoleActivity : ComponentActivity() {
     if (sessionStarted) return
     sessionStarted = session.start(object : ConsoleSession.Listener {
       override fun onOutput(text: String) {
-        handler.post {
-          webView.evaluateJavascript("window.__consoleAppend(" + jsString(text) + ")", null)
-        }
+        handler.post { output = capOutput(output + text) }
       }
 
       override fun onStatus(text: String) {
-        lastStatus = text
-        handler.post { pushStatus(text) }
+        handler.post { consoleStatus = text }
       }
 
       override fun onExit(code: Int) {
-        handler.post {
-          webView.evaluateJavascript(
-            "window.__consoleStatus(" + jsString("bash 已退出（code $code）") + ")", null,
-          )
-        }
+        handler.post { consoleStatus = "bash 已退出（code $code）" }
       }
     })
   }
 
   override fun onDestroy() {
     session.destroy()
-    webView.destroy()
     super.onDestroy()
   }
 
-  /** JS 桥：命令提交 + 引擎状态查询。 */
-  inner class ConsoleBridge {
-    @JavascriptInterface
-    fun submit(command: String) {
-      session.writeCommand(command)
-    }
+  /** 输出上限（字符数）：超出时从最近换行处裁掉旧内容，防无界增长卡顿。 */
+  private fun capOutput(text: String): String {
+    if (text.length <= OUTPUT_CAP) return text
+    val cut = text.substring(text.length - OUTPUT_KEEP)
+    val nl = cut.indexOf('\n')
+    return if (nl >= 0) cut.substring(nl + 1) else cut
+  }
 
-    @JavascriptInterface
-    fun engineStatus(): String = EngineProbe.check().toString()
+  companion object {
+    private const val OUTPUT_CAP = 200_000
+    private const val OUTPUT_KEEP = 150_000
   }
 }

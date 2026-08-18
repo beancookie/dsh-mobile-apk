@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <color name="ic_launcher_background">#ffffff</color>
+  <!-- WebView 加载进度条主色（品牌蓝，与 Compose 主题 primary 一致）。 -->
+  <color name="dsh_accent">#2D5F9E</color>
 </resources>

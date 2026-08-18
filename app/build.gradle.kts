@@ -1,6 +1,7 @@
 plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
+  id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -16,6 +17,10 @@ android {
     targetSdk = 34
     versionCode = 15
     versionName = "0.12.1"
+  }
+
+  buildFeatures {
+    compose = true
   }
 
   androidResources {
@@ -66,4 +71,12 @@ dependencies {
   implementation("org.tukaani:xz:1.10")
   implementation("dev.rikka.shizuku:api:13.1.5")
   implementation("dev.rikka.shizuku:provider:13.1.5")
+
+  // Jetpack Compose UI（Kotlin 2.0 compose 编译器插件；BOM 统管版本）。
+  implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+  implementation("androidx.compose.ui:ui")
+  implementation("androidx.compose.material3:material3")
+  implementation("androidx.compose.ui:ui-tooling-preview")
+  implementation("androidx.activity:activity-compose:1.10.1")
+  debugImplementation("androidx.compose.ui:ui-tooling")
 }

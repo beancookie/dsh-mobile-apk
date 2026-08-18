@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <!-- 原生页面固定浅色：窗口/状态栏浅色 + 深色状态栏图标。 -->
   <style name="Theme.Dsh" parent="android:Theme.Material.Light.NoActionBar">
     <item name="android:windowBackground">#ffffff</item>
-    <item name="android:statusBarColor">#0f1720</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <!-- 刘海/挖孔屏：内容延伸到刘海区域，避免顶部黑边（API 28+ 生效）。 -->
+    <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
   </style>
 </resources>
