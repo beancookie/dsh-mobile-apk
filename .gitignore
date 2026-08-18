@@ -11,3 +11,7 @@ token*
 *.p12
 .kotlin/
 .idea/
+# 发布签名（本地生成，不入库；CI 用仓库 secrets 注入）
+keystore/
+keystore.properties
+

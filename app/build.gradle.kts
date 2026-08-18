@@ -4,6 +4,8 @@ plugins {
   id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.util.Properties
+
 android {
   namespace = "com.dshmobile.shell"
   compileSdk = 36
@@ -31,6 +33,20 @@ android {
   buildTypes {
     release {
       isMinifyEnabled = false
+      // 签名：优先读 keystore.properties（本地）；CI 通过环境变量注入。
+      val keyProps = Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+      }
+      val storeFileProp = keyProps.getProperty("storeFile") ?: System.getenv("KEYSTORE_PATH")
+      if (!storeFileProp.isNullOrBlank()) {
+        signingConfig = signingConfigs.create("release") {
+          storeFile = rootProject.file(storeFileProp)
+          storePassword = keyProps.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
+          keyAlias = keyProps.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
+          keyPassword = keyProps.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
+        }
+      }
     }
   }
 
