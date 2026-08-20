@@ -27,19 +27,22 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # 运行时快照不入库（约 110MB）：从本仓库最新已发布 Release 取 snapshot-x86_64.tar.xz。
-      - name: Resolve runtime snapshot
+      # 运行时快照不入库（约 110MB×2）：从本仓库最新已发布 Release 取双 ABI 快照。
+      # 快照放入项目根 snapshot/（stageSnapshot 按 -PsnapshotAbi 取用 + ELF 架构门禁）。
+      - name: Resolve runtime snapshots
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p app/src/main/assets
+          mkdir -p snapshot
           SNAP_DIR=/tmp/snap; mkdir -p "$SNAP_DIR"
           LATEST=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          echo "fetching snapshot from release: ${LATEST}"
+          echo "fetching snapshots from release: ${LATEST}"
           gh release download "${LATEST}" --pattern 'snapshot-*.tar.xz' --dir "$SNAP_DIR" --clobber || true
-          cp "$SNAP_DIR"/snapshot-*.tar.xz app/src/main/assets/snapshot.tar.xz
-          test -f app/src/main/assets/snapshot.tar.xz
+          cp "$SNAP_DIR"/snapshot-arm64.tar.xz snapshot/ 2>/dev/null || true
+          cp "$SNAP_DIR"/snapshot-x86_64.tar.xz snapshot/ 2>/dev/null || true
+          test -f snapshot/snapshot-arm64.tar.xz
+          test -f snapshot/snapshot-x86_64.tar.xz
 
       # 签名密钥（可选）：仓库 secrets 注入；未配置则产出未签名 APK。
       - name: Restore signing key
@@ -51,13 +54,20 @@ jobs:
             echo "$KEYSTORE_B64" | base64 -d > keystore/release.jks
           fi
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease -PsnapshotAbi=x86_64 --no-daemon
+      - name: Build release APKs (dual ABI)
         env:
           KEYSTORE_PATH: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'keystore/release.jks' || '' }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          for abi in arm64 x86_64; do
+            ./gradlew assembleRelease -PsnapshotAbi=$abi --no-daemon
+            cp "$(find app/build/outputs/apk/release -name '*.apk' | head -1)" "/tmp/dsh-mobile-apk-${TAG}-${abi}.apk"
+          done
+          ls -l /tmp/dsh-mobile-apk-${TAG}-*.apk
 
       - name: Stage release assets + MANIFEST
         env:
@@ -66,8 +76,10 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           STAGE=/tmp/assets; mkdir -p "$STAGE"
-          cp "$(find app/build/outputs/apk/release -name '*.apk' | head -1)" "$STAGE/dsh-mobile-apk-${TAG}-x86_64.apk"
-          cp /tmp/snap/snapshot-*.tar.xz "$STAGE/snapshot-x86_64.tar.xz"
+          cp /tmp/dsh-mobile-apk-${TAG}-arm64.apk "$STAGE/"
+          cp /tmp/dsh-mobile-apk-${TAG}-x86_64.apk "$STAGE/"
+          cp /tmp/snap/snapshot-arm64.tar.xz "$STAGE/snapshot-arm64.tar.xz"
+          cp /tmp/snap/snapshot-x86_64.tar.xz "$STAGE/snapshot-x86_64.tar.xz"
           # MANIFEST：sha256 + 分类路径 + 字节数
           : > "$STAGE/MANIFEST.txt"
           for f in "$STAGE"/*; do
