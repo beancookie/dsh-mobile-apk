@@ -1,4 +1,4 @@
-package com.dshmobile.shell.ui
+package com.dsharnessmobile.shell.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -40,8 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
-import com.dshmobile.shell.R
-import com.dshmobile.shell.ui.theme.splashBrush
+import com.dsharnessmobile.shell.R
+import com.dsharnessmobile.shell.ui.theme.splashBrush
 
 /**
  * 启动/测试引导页（Compose，渲染在独立 ComposeView 内，作为普通 View 与

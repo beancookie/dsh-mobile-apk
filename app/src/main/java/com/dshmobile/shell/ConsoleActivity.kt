@@ -1,4 +1,4 @@
-package com.dshmobile.shell
+package com.dsharnessmobile.shell
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,8 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.dshmobile.shell.ui.ConsoleScreen
-import com.dshmobile.shell.ui.theme.DshTheme
+import com.dsharnessmobile.shell.ui.ConsoleScreen
+import com.dsharnessmobile.shell.ui.theme.DshTheme
 
 /**
  * 内置控制台：Compose 原生终端界面（状态栏 + 输出区 + 命令输入行），

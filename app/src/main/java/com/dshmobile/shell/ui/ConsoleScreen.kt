@@ -1,4 +1,4 @@
-package com.dshmobile.shell.ui
+package com.dsharnessmobile.shell.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -49,7 +49,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dshmobile.shell.EngineProbe
+import com.dsharnessmobile.shell.EngineProbe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext

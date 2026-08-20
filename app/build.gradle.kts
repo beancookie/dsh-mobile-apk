@@ -14,18 +14,25 @@ val snapshotAbi: String = providers.gradleProperty("snapshotAbi")
   .get()
 
 android {
-  namespace = "com.dshmobile.shell"
+  namespace = "com.dsharnessmobile.shell"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.dshmobile.shell"
+    applicationId = "com.dsharnessmobile.shell"
     minSdk = 26
     // targetSdk 34: Android 15+ forbids exec of app-data ELF for targetSdk 35+
     // (the embedded engine, bash, and every child command would need linker64
     // wrappers); 34 keeps native exec working on Android 15/16 devices.
     targetSdk = 34
-    versionCode = 16
-    versionName = "0.12.2"
+    versionCode = 18
+    // Snapshot builds append a suffix (e.g. -SN-1-RC8) via -PversionNameSuffix; release builds pass none.
+    val snapshotSuffix = providers.gradleProperty("versionNameSuffix").getOrElse("")
+    versionName = "0.12.4" + snapshotSuffix
+    buildConfigField("String", "TERMUX_VERSION", "\"0.118.3\"")
+  }
+
+  buildFeatures {
+    buildConfig = true
   }
 
   buildFeatures {
@@ -35,6 +42,19 @@ android {
   androidResources {
     // snapshot.tar.xz is already xz-compressed; double-compressing it breaks openFd.
     noCompress += "xz"
+  }
+
+  signingConfigs {
+    // Fixed debug signing from the repo keystore: CI and local builds must produce
+    // byte-compatible signatures, otherwise users cannot install over previous
+    // releases (INSTALL_FAILED_UPDATE_INCOMPATIBLE). AGP's default debug keystore
+    // lookup (~/.android/debug.keystore) is unreliable on CI runners, so pin it.
+    create("repoDebug") {
+      storeFile = rootProject.file("keystore/debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
   }
 
   buildTypes {
@@ -58,10 +78,13 @@ android {
         }
       }
     }
+    debug {
+      signingConfig = signingConfigs.getByName("repoDebug")
+    }
   }
 
   lint {
-    // 离线环境无 lint-gradle 依赖缓存（国内网络）；lint 非发布关键路径。
+    // Offline environments lack the lint-gradle dependency cache (CN networks); lint is not on the release-critical path.
     checkReleaseBuilds = false
     abortOnError = false
   }

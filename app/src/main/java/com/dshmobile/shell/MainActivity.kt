@@ -1,4 +1,4 @@
-package com.dshmobile.shell
+package com.dsharnessmobile.shell
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -39,8 +39,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.dshmobile.shell.ui.GuideScreen
-import com.dshmobile.shell.ui.theme.DshTheme
+import com.dsharnessmobile.shell.ui.GuideScreen
+import com.dsharnessmobile.shell.ui.theme.DshTheme
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -196,7 +196,7 @@ class MainActivity : ComponentActivity() {
 
   companion object {
     private const val TAG = "dsh-shell"
-    const val ACTION_UPDATE = "com.dshmobile.shell.action.UPDATE"
+    const val ACTION_UPDATE = "com.dsharnessmobile.shell.action.UPDATE"
 
     /** 导出文件大小上限（防恶意/异常大文件 OOM）。 */
     const val MAX_DOWNLOAD_BYTES = 200L * 1024 * 1024
@@ -417,7 +417,7 @@ class MainActivity : ComponentActivity() {
     setContentView(root)
     // WebView 已挂载后配置 + 加载（末尾 loadUrl），与 HEAD「先挂载再加载」一致。
     configureWebView()
-    // Testable update trigger: adb am start -n .../.MainActivity -a com.dshmobile.shell.action.UPDATE
+    // Testable update trigger: adb am start -n .../.MainActivity -a com.dsharnessmobile.shell.action.UPDATE
     if (intent?.action == ACTION_UPDATE) {
       runUpdate()
     } else {

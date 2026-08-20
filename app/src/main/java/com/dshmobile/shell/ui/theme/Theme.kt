@@ -1,4 +1,4 @@
-package com.dshmobile.shell.ui.theme
+package com.dsharnessmobile.shell.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
