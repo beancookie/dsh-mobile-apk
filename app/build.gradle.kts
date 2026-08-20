@@ -1,4 +1,14 @@
+import java.io.BufferedInputStream
+import java.io.FileInputStream
 import java.util.Properties
+import org.tukaani.xz.XZInputStream
+
+buildscript {
+  dependencies {
+    // 快照 ELF 架构校验需要解压 tar.xz 流（与 app 运行时同版本 xz 库）。
+    classpath("org.tukaani:xz:1.10")
+  }
+}
 
 plugins {
   id("com.android.application")
@@ -108,16 +118,89 @@ val snapshotAbiFile = listOf(
   file("src/main/assets/snapshot-${snapshotAbi}.tar.xz"),
 ).firstOrNull { it.exists() }
 val snapshotPlainFile = file("src/main/assets/snapshot.tar.xz")
+
+// —— 快照 ELF 架构校验（防「文件名对、内容错」的错标快照进 APK）——
+// e_machine 值：EM_X86_64=62，EM_AARCH64=183。流式解压 xz，滚动 64B 窗口扫
+// ELF 头（magic + e_machine），统计每种架构的 ELF 数，不做整包解压。
+val expectedElfMachine = when (snapshotAbi) {
+  "arm64" -> 183 // EM_AARCH64
+  "x86_64" -> 62 // EM_X86_64
+  else -> null // 未知 ABI：跳过内容校验
+}
+
+fun elfMachineCounts(file: File): Map<Int, Int> {
+  val machines = HashMap<Int, Int>()
+  val chunk = ByteArray(1 shl 20)
+  val win = ByteArray(64)
+  var winLen = 0L
+  XZInputStream(BufferedInputStream(FileInputStream(file), 1 shl 16)).use { xz ->
+    while (true) {
+      val n = xz.read(chunk)
+      if (n < 0) break
+      var i = 0
+      while (i < n) {
+        val pos = winLen
+        win[(pos % 64).toInt()] = chunk[i]
+        winLen++
+        // 触发点 = ELF 头 e_machine 高字节（偏移 19）：magic 位于 pos-19..pos-16，
+        // machine 低/高字节位于 pos-1/pos。
+        if (pos >= 19 &&
+          win[((pos - 19) % 64).toInt()].toInt() == 0x7f &&
+          win[((pos - 18) % 64).toInt()].toInt() == 0x45 &&
+          win[((pos - 17) % 64).toInt()].toInt() == 0x4c &&
+          win[((pos - 16) % 64).toInt()].toInt() == 0x46
+        ) {
+          val m = (win[((pos - 1) % 64).toInt()].toInt() and 0xff) or
+            ((win[(pos % 64).toInt()].toInt() and 0xff) shl 8)
+          machines.merge(m, 1, Int::plus)
+        }
+        i++
+      }
+    }
+  }
+  return machines
+}
+
+fun machineName(m: Int): String = when (m) {
+  183 -> "EM_AARCH64"
+  62 -> "EM_X86_64"
+  else -> "EM_0x%04X".format(m)
+}
+
+fun verifySnapshotAbi(file: File) {
+  val expected = expectedElfMachine ?: return
+  val counts = elfMachineCounts(file)
+  val expectedCount = counts[expected] ?: 0
+  val total = counts.values.sum()
+  val summary = counts.entries.sortedByDescending { it.value }
+    .joinToString(", ") { "${machineName(it.key)}=${it.value}" }
+  if (total > 0 && expectedCount == 0) {
+    throw GradleException(
+      "快照 ABI 校验失败：${file.name} 内未发现任何 ${machineName(expected)} ELF（实际：$summary）——" +
+        "内容与 -PsnapshotAbi=$snapshotAbi 不符，疑似错标！请核对 snapshot/snapshot-$snapshotAbi.tar.xz 的来源。",
+    )
+  }
+  if (expectedCount > 0) {
+    logger.lifecycle("> snapshot ELF 校验：${machineName(expected)}=$expectedCount / 总 ELF=$total")
+  } else {
+    logger.warn("> snapshot ELF 校验：${file.name} 中未发现 ELF（total=$total），跳过架构断言")
+  }
+}
+
 val stageSnapshot = tasks.register("stageSnapshot") {
   doFirst {
     when {
       snapshotAbiFile != null -> {
         snapshotAbiFile.copyTo(snapshotPlainFile, overwrite = true)
         logger.lifecycle("> snapshot ABI: ${snapshotAbi}（${snapshotAbiFile.length()} bytes）")
+        verifySnapshotAbi(snapshotPlainFile)
       }
-      snapshotPlainFile.exists() -> logger.warn(
-        "缺少 snapshot/snapshot-${snapshotAbi}.tar.xz，使用现有 snapshot.tar.xz（ABI 未校验，可能错标！）",
-      )
+      snapshotPlainFile.exists() -> {
+        logger.warn(
+          "缺少 snapshot/snapshot-${snapshotAbi}.tar.xz，使用现有 snapshot.tar.xz（按 -PsnapshotAbi=$snapshotAbi 校验内容）",
+        )
+        verifySnapshotAbi(snapshotPlainFile)
+      }
       else -> throw GradleException(
         "缺少运行时快照 snapshot/snapshot-${snapshotAbi}.tar.xz —— " +
           "从 GitHub Releases 下载 snapshot-${snapshotAbi}.tar.xz 后放到项目根 snapshot/ 目录，" +
