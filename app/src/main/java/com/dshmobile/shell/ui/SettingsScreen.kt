@@ -54,6 +54,7 @@ fun SettingsScreen(
   onThemeChange: (String) -> Unit,
   onCheckUpdate: () -> Unit,
   onOpenConsole: () -> Unit,
+  onOpenFileManager: () -> Unit,
 ) {
   Column(
     Modifier
@@ -134,6 +135,8 @@ fun SettingsScreen(
       SectionTitle(text = stringResource(R.string.settings_section_actions))
       SettingsCard {
         ActionRow(label = stringResource(R.string.settings_open_console), onClick = onOpenConsole)
+        CardDivider(indent = 16.dp)
+        ActionRow(label = stringResource(R.string.settings_open_file_manager), onClick = onOpenFileManager)
         CardDivider(indent = 16.dp)
         ActionRow(label = stringResource(R.string.settings_check_update), onClick = onCheckUpdate)
       }

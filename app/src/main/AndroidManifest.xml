@@ -42,5 +42,11 @@
       android:name=".SettingsActivity"
       android:exported="false"
       android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
+
+    <!-- 文件管理：只读浏览应用数据目录（虚拟系统文件）。 -->
+    <activity
+      android:name=".FileManagerActivity"
+      android:exported="false"
+      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
   </application>
 </manifest>

@@ -15,10 +15,26 @@
   <string name="settings_section_actions">Actions</string>
   <string name="settings_check_update">Check updates</string>
   <string name="settings_open_console">Open console</string>
+  <string name="settings_open_file_manager">File manager</string>
   <string name="settings_log_title">Runtime log</string>
   <string name="settings_log_empty">No runtime log</string>
   <string name="settings_log_expand">Expand ▾</string>
   <string name="settings_log_collapse">Collapse ▴</string>
+
+  <!-- File manager -->
+  <string name="file_manager_title">File manager</string>
+  <string name="file_manager_root">App data</string>
+  <string name="file_manager_empty">Empty folder</string>
+  <string name="file_manager_error">Cannot read this folder</string>
+  <string name="file_manager_type">Type</string>
+  <string name="file_manager_size">Size</string>
+  <string name="file_manager_modified">Modified</string>
+  <string name="file_manager_binary">Binary file, no preview</string>
+  <string name="file_manager_preview_truncated">Content too long, showing the beginning</string>
+  <string name="file_manager_folder">Folder</string>
+  <string name="file_manager_file">File</string>
+  <string name="file_manager_close">Close</string>
+  <string name="file_manager_items">%1$d items</string>
 
   <!-- Guide -->
   <string name="guide_title">DeepSeek Harness</string>

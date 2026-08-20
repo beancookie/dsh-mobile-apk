@@ -15,10 +15,26 @@
   <string name="settings_section_actions">操作</string>
   <string name="settings_check_update">检查更新</string>
   <string name="settings_open_console">打开控制台</string>
+  <string name="settings_open_file_manager">文件管理</string>
   <string name="settings_log_title">运行日志</string>
   <string name="settings_log_empty">暂无运行日志</string>
   <string name="settings_log_expand">展开 ▾</string>
   <string name="settings_log_collapse">收起 ▴</string>
+
+  <!-- 文件管理 -->
+  <string name="file_manager_title">文件管理</string>
+  <string name="file_manager_root">应用数据目录</string>
+  <string name="file_manager_empty">空目录</string>
+  <string name="file_manager_error">无法读取该目录</string>
+  <string name="file_manager_type">类型</string>
+  <string name="file_manager_size">大小</string>
+  <string name="file_manager_modified">修改时间</string>
+  <string name="file_manager_binary">二进制文件，无法预览</string>
+  <string name="file_manager_preview_truncated">内容过长，仅显示开头</string>
+  <string name="file_manager_folder">文件夹</string>
+  <string name="file_manager_file">文件</string>
+  <string name="file_manager_close">关闭</string>
+  <string name="file_manager_items">%1$d 项</string>
 
   <!-- 引导页 -->
   <string name="guide_title">DeepSeek Harness</string>

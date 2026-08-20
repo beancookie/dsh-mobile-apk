@@ -73,6 +73,9 @@ class SettingsActivity : ComponentActivity() {
           onOpenConsole = {
             startActivity(Intent(this, ConsoleActivity::class.java))
           },
+          onOpenFileManager = {
+            startActivity(Intent(this, FileManagerActivity::class.java))
+          },
         )
       }
     }
