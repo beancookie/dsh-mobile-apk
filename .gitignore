@@ -6,6 +6,10 @@ snapshot/
 app/src/main/assets/snapshot.tar.xz
 app/src/main/assets/snapshot-*.tar.xz
 app/src/main/assets/snapshot.sha256
+# 快照解压产物（仅本机查看用，会打进 APK / 误提交；运行时由 snapshot.tar.xz 解压生成）
+app/src/main/assets/usr/
+app/src/main/assets/home/
+app/src/main/assets/snapshot.tar
 # 敏感数据（安全审计 2026-08-14）
 *.credentials.yaml
 token*

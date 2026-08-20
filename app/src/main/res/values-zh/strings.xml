@@ -44,10 +44,6 @@
 
   <!-- 控制台 -->
   <string name="console_title">dsh 控制台</string>
-  <string name="console_placeholder">输入命令，回车执行</string>
-  <string name="console_clear">清屏</string>
-  <string name="console_paste">粘贴</string>
-  <string name="console_send">发送</string>
   <string name="console_engine_checking">引擎检测中…</string>
   <string name="console_engine_running">引擎运行中（%1$d ms）</string>
   <string name="console_engine_down">引擎未运行</string>

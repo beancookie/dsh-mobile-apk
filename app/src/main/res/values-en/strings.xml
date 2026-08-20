@@ -44,10 +44,6 @@
 
   <!-- Console -->
   <string name="console_title">dsh Console</string>
-  <string name="console_placeholder">Type a command, press Enter</string>
-  <string name="console_clear">Clear</string>
-  <string name="console_paste">Paste</string>
-  <string name="console_send">Send</string>
   <string name="console_engine_checking">Checking engine…</string>
   <string name="console_engine_running">Engine running (%1$d ms)</string>
   <string name="console_engine_down">Engine not running</string>
