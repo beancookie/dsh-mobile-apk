@@ -36,5 +36,11 @@
       android:exported="false"
       android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
       android:windowSoftInputMode="adjustResize" />
+
+    <!-- 设置页：语言（跟随系统/中文/English）+ 主题（跟随系统/浅色/深色）。 -->
+    <activity
+      android:name=".SettingsActivity"
+      android:exported="false"
+      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
   </application>
 </manifest>

@@ -62,7 +62,6 @@ class MainActivity : ComponentActivity() {
   private var progressBarVisible by mutableStateOf(false)
   private var progressText by mutableStateOf("")
   private var crashBannerText by mutableStateOf<String?>(null)
-  private var logSummaryText by mutableStateOf<String?>(null)
   /** 崩溃标记：记录未捕获异常摘要，下次启动测试界面提示（不吞异常）。 */
   private var crashInfo: String? = null
   /** 引擎页是否已加载（首次进入 WebView 才 loadUrl，避免引擎未就绪时渲染错误页）。 */
@@ -73,6 +72,8 @@ class MainActivity : ComponentActivity() {
   private var webActivated = false
   /** 重启引擎 in-flight 守卫（防连点双杀双启）。 */
   private val engineRestarting = java.util.concurrent.atomic.AtomicBoolean(false)
+  /** 设置版本号（语言/主题变更）——onResume 检测到变化即 recreate 应用。 */
+  private var seenConfigVersion = -1
   /** 前台引擎监控：3s 轮询探测，down→测试界面、up→恢复 WebUI
    *  （"设置里杀进程/引擎崩溃回退测试界面"的落地；watchdog 负责恢复）。 */
   private val engineMonitorHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -341,6 +342,10 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  override fun attachBaseContext(newBase: Context) {
+    super.attachBaseContext(AppPrefs.localeContext(newBase))
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     // 崩溃标记：进程级未捕获异常写入 filesDir/.crashed（下次启动测试界面
@@ -382,19 +387,17 @@ class MainActivity : ComponentActivity() {
     guideView = ComposeView(this).apply {
       visibility = View.GONE
       setContent {
-        DshTheme {
+        DshTheme(darkTheme = AppPrefs.isDark(this@MainActivity)) {
           GuideScreen(
             engineStatusText = engineStatusText,
             progressBarVisible = progressBarVisible,
             progressText = progressText,
             crashBanner = crashBannerText,
-            logSummary = logSummaryText,
             engineReady = engineReady,
             onEnterWeb = { showWeb() },
-            onOpenConsole = { startActivity(Intent(this@MainActivity, ConsoleActivity::class.java)) },
             onRetry = { startEngineFlow() },
-            onUpdate = {
-              UpdateManager(this@MainActivity).checkAndApply { status -> engineStatusText = status }
+            onOpenSettings = {
+              startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
             },
           )
         }
@@ -427,6 +430,17 @@ class MainActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
+    // 设置变更（语言/主题）→ recreate 应用（语言需重建走 attachBaseContext，
+    // 主题需重建让 Compose/系统栏/WebView forceDark 生效）。
+    val cfgV = AppPrefs.configVersion(this)
+    when {
+      seenConfigVersion == -1 -> seenConfigVersion = cfgV
+      cfgV != seenConfigVersion -> {
+        seenConfigVersion = cfgV
+        recreate()
+        return
+      }
+    }
     // 前台引擎监控：引擎被杀/崩溃时自动回退测试界面，恢复后回 WebUI。
     engineMonitorHandler.removeCallbacks(engineMonitorRunnable)
     engineMonitorHandler.post(engineMonitorRunnable)
@@ -531,24 +545,34 @@ class MainActivity : ComponentActivity() {
 
   override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
     super.onConfigurationChanged(newConfig)
-    // uiMode 切换：系统栏图标 + 进度条主色跟随深浅（Compose 侧自动重组合）。
+    // uiMode 切换：系统栏图标 + 进度条主色 + WebView forceDark 跟随主题
+    // （Compose 侧自动重组合）。
     applySystemBarsAppearance()
+    updateWebViewForceDark()
     pushSystemDark(webView)
   }
 
-  /** 系统栏图标颜色跟随系统深浅（浅色背景深图标，深色背景浅图标）。 */
+  /** WebView forceDark 跟随应用主题（深色→AUTO，浅色→OFF）。 */
+  private fun updateWebViewForceDark() {
+    if (Build.VERSION.SDK_INT >= 29) {
+      @Suppress("DEPRECATION")
+      webView.settings.forceDark =
+        if (AppPrefs.isDark(this)) WebSettings.FORCE_DARK_AUTO else WebSettings.FORCE_DARK_OFF
+    }
+  }
+
+  /** 系统栏图标颜色跟随应用主题深浅（浅色背景深图标，深色背景浅图标）。 */
   private fun applySystemBarsAppearance() {
-    val night = (resources.configuration.uiMode and
-      android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-      android.content.res.Configuration.UI_MODE_NIGHT_YES
+    val dark = AppPrefs.isDark(this)
+    AppPrefs.applyWindowBackground(this)
     WindowInsetsControllerCompat(window, window.decorView).apply {
-      isAppearanceLightStatusBars = !night
-      isAppearanceLightNavigationBars = !night
+      isAppearanceLightStatusBars = !dark
+      isAppearanceLightNavigationBars = !dark
     }
     // WebView 加载进度条主色随深浅切换（与 Compose primary 一致）。
     if (::webProgressBar.isInitialized) {
       webProgressBar.progressTintList = android.content.res.ColorStateList.valueOf(
-        if (night) 0xFF79B8FF.toInt() else 0xFF2D5F9E.toInt(),
+        if (dark) 0xFF79B8FF.toInt() else 0xFF2D5F9E.toInt(),
       )
     }
   }
@@ -572,12 +596,10 @@ class MainActivity : ComponentActivity() {
       cacheMode = WebSettings.LOAD_NO_CACHE
       // 字体大小（设置 → 通用设置）：从本地持久化恢复，不依赖页面缓存。
       textZoom = textZoomPrefs().coerceIn(50, 200)
-      // prefers-color-scheme 跟随系统深色（某些厂商 WebView 默认不跟随；
-      // FORCE_DARK_AUTO 让 media query 反映系统深浅，dsh 的"跟随系统"主题依赖它）。
-      if (Build.VERSION.SDK_INT >= 29) {
-        @Suppress("DEPRECATION")
-        forceDark = WebSettings.FORCE_DARK_AUTO
-      }
+      // prefers-color-scheme 跟随应用主题深浅：forceDark 控制 WebView 是否
+      // 自动反色，深色 AUTO（配合 dsh 页面自绘深色），浅色 OFF（防止系统
+      // 深色下强制浅色被 WebView 反色）。
+      updateWebViewForceDark()
     }
     webView.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -673,11 +695,7 @@ class MainActivity : ComponentActivity() {
         onNotify = { title, text -> showTestNotification(title, text) },
         onAllFilesAccessRequest = { openAllFilesAccessSettings() },
         onDebugLogsRequest = { downloadDebugLogs() },
-        onGetSystemDark = {
-          (resources.configuration.uiMode and
-            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        },
+        onGetSystemDark = { AppPrefs.isDark(this) },
         onPickImageRequest = { callbackId -> pickImageForBridge(callbackId) },
         onSetTextZoomRequest = { percent -> setTextZoomPersisted(percent) },
         onSetImmersiveRequest = { enable -> setImmersivePersisted(enable) },
@@ -1026,9 +1044,7 @@ class MainActivity : ComponentActivity() {
    *  Runnable 体内 try/catch + onDestroy removeCallbacks（M7：防销毁后
    *  迟到的 evaluateJavascript 抛主线程异常）。 */
   private fun pushSystemDark(view: android.webkit.WebView) {
-    val dark = (resources.configuration.uiMode and
-      android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-      android.content.res.Configuration.UI_MODE_NIGHT_YES
+    val dark = AppPrefs.isDark(this)
     try {
       view.evaluateJavascript(
         "window.__dshThemeBridge && window.__dshThemeBridge.setDark(" + dark + ")", null,
@@ -1286,25 +1302,12 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  /** 进入测试界面（引擎失败/未就绪回退）：状态 + 崩溃横幅 + engine.log 摘要。 */
+  /** 进入测试界面（引擎失败/未就绪回退）：状态 + 崩溃横幅。 */
   private fun showGuide() {
     webView.visibility = View.GONE
     webProgressBar.visibility = View.GONE
     guideView.visibility = View.VISIBLE
     crashBannerText = crashInfo?.let { "上次异常退出：$it" }
-    val tail = tailEngineLog(8)
-    logSummaryText = if (tail.isNotEmpty()) "engine.log 末尾：\n$tail" else null
-  }
-
-  /** engine.log 尾部摘要（测试界面诊断用；缺失/不可读返回空）。 */
-  private fun tailEngineLog(lines: Int): String {
-    val f = File(filesDir, "engine.log")
-    if (!f.exists()) return ""
-    return try {
-      f.readLines().takeLast(lines).joinToString("\n")
-    } catch (_: Exception) {
-      ""
-    }
   }
 
   /** 进程级崩溃标记：记录未捕获异常摘要，交回默认 handler（不吞异常）。 */

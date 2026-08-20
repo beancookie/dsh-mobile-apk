@@ -71,6 +71,18 @@ object LogCollector {
     }
   }
 
+  /** engine.log 尾部 N 行摘要（设置页「运行日志」用；缺失/不可读返回空）。 */
+  fun engineLogTail(context: Context, lines: Int): String {
+    val f = File(context.filesDir, "engine.log")
+    if (!f.exists()) return ""
+    return try {
+      f.readLines().takeLast(lines).joinToString("\n")
+    } catch (t: Throwable) {
+      Log.w(TAG, "engine.log tail failed: " + (t.message ?: t.javaClass.simpleName))
+      ""
+    }
+  }
+
   /** Current log directory (falls back to private filesDir/log without the public-dir grant). */
   fun currentDir(context: Context): File {
     val base = if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) {

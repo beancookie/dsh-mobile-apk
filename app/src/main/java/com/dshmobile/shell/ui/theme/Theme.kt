@@ -1,6 +1,5 @@
 package com.dsharnessmobile.shell.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -34,10 +33,10 @@ private val DarkColors = darkColorScheme(
   error = DshErrorDark,
 )
 
-/** dsh 主题：深色跟随系统（uiMode 变更时 Compose 自动重组合）。 */
+/** dsh 主题：深浅色由调用方传入（跟随系统/浅色/深色，见 AppPrefs.isDark）。 */
 @Composable
 fun DshTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
+  darkTheme: Boolean,
   content: @Composable () -> Unit,
 ) {
   MaterialTheme(
@@ -46,10 +45,10 @@ fun DshTheme(
   )
 }
 
-/** 引导页背景渐变（不透明，深浅色随 uiMode）。 */
+/** 引导页背景渐变（不透明，深浅色随 dark 参数）。 */
 @Composable
-fun splashBrush(): Brush =
-  if (isSystemInDarkTheme()) {
+fun splashBrush(dark: Boolean): Brush =
+  if (dark) {
     Brush.verticalGradient(listOf(DshSplashTopDark, DshSplashBottomDark))
   } else {
     Brush.verticalGradient(listOf(DshSplashTopLight, DshSplashBottomLight))

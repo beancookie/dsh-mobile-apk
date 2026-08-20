@@ -247,6 +247,10 @@ dependencies {
   implementation("dev.rikka.shizuku:api:13.1.5")
   implementation("dev.rikka.shizuku:provider:13.1.5")
 
+  // Termux 终端模拟器（terminal-view 传递引入 terminal-emulator，含 PTY JNI .so；
+  // Apache 2.0 许可证）：控制台真终端（ANSI/真彩色 + PTY + 手势 + 软键盘直通）。
+  implementation("com.github.termux.termux-app:terminal-view:0.118.3")
+
   // Jetpack Compose UI（Kotlin 2.0 compose 编译器插件；BOM 统管版本）。
   implementation(platform("androidx.compose:compose-bom:2024.12.01"))
   implementation("androidx.compose.ui:ui")

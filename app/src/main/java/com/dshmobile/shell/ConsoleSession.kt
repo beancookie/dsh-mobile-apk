@@ -2,130 +2,94 @@ package com.dsharnessmobile.shell
 
 import android.content.Context
 import android.util.Log
+import com.termux.terminal.TerminalSession
+import com.termux.terminal.TerminalSessionClient
 import java.io.File
+import java.io.IOException
 
 /**
- * Console session: spawns the snapshot bash (env matching the engine: PATH/LD_LIBRARY_PATH/
- * HOME/DSH_HOME/TERMUX_*), writes commands to stdin, reads merged stdout/stderr on a background
- * thread, and streams output back to the UI via a Listener. Works even when the engine is not
- * running (for diagnosing engine startup failures); the process dies with the Activity.
+ * Console session: builds a Termux [TerminalSession] running the snapshot bash with the engine
+ * environment (PATH/LD_LIBRARY_PATH/HOME/DSH_HOME/TERMUX_* + PS1) over a real PTY. The PTY is
+ * created by the bundled terminal-emulator JNI (fork + openpty + execvp); the session owns the
+ * reader/writer/waiter threads and feeds the [TerminalView]'s emulator via its [TerminalSessionClient].
  *
- * Non-PTY interaction (bash -i): no job-control prompts, commands run line by line; full PTY
- * (script -q -c bash) is planned for a later iteration.
+ * Works even when the engine is not running (diagnostics). On devices that forbid exec of app-data
+ * ELF (Android 15/16, some OEMs), the shell is launched via /system/bin/linker64 (probe-first,
+ * mirrors the old pipe-session behavior).
  */
 class ConsoleSession(private val context: Context) {
 
   interface Listener {
-    /** Output chunk (\r collapsed, bell ignored); callback on any thread. */
-    fun onOutput(text: String)
     /** Status text (startup/exit); callback on any thread. */
     fun onStatus(text: String)
-    /** bash process exit code. */
+    /** bash process exit code (positive code or negated signal). */
     fun onExit(code: Int)
+    /** Copy the given terminal text to the system clipboard. */
+    fun onCopyText(text: String)
+    /** Paste text from the system clipboard (null when empty). */
+    fun onPasteText(): String?
   }
 
-  private var process: Process? = null
-  private var closed = false
+  private var terminalSession: TerminalSession? = null
 
-  /** Start bash; on failure report the reason via listener.onStatus and return false. */
-  fun start(listener: Listener): Boolean {
+  /** The running Termux terminal session, or null until [create] succeeds. */
+  fun session(): TerminalSession? = terminalSession
+
+  /**
+   * Build the shell session. Must be called before attaching to the view.
+   * @return false if the snapshot bash is missing (status reported via listener).
+   */
+  fun create(client: TerminalSessionClient, listener: Listener): Boolean {
     val engineManager = EngineManager(context, EngineManager.ensurePickToken())
     val bash = File(engineManager.usrDir, "bin/bash")
     if (!bash.exists()) {
-      listener.onStatus("快照缺失（usr/bin/bash 不存在），无法打开控制台")
+      listener.onStatus(context.getString(R.string.console_bash_missing))
       return false
     }
-    // Exec-bit fallback: some devices/filesystems lose the exec bit after extraction (execve → EACCES,
-    // "Permission denied"). The tar mode is theoretically preserved; this is an idempotent hardening step.
+    // Exec-bit fallback: some devices/filesystems lose the exec bit after extraction.
     try {
       bash.setExecutable(true, false)
     } catch (t: Throwable) {
       Log.w(TAG, "bash setExecutable failed: " + (t.message ?: t.javaClass.simpleName))
     }
+    val envMap = engineManager.shellEnv() + ("PS1" to "dsh:\\w$ ")
+    val env = envMap.map { "${it.key}=${it.value}" }.toTypedArray()
+    val cwd = engineManager.homeDir.absolutePath
+    val shellPath = if (canExecDirect(bash, envMap)) bash.absolutePath else "/system/bin/linker64"
+    val args = if (shellPath == bash.absolutePath) {
+      arrayOf(shellPath, "-i")
+    } else {
+      arrayOf(shellPath, bash.absolutePath, "-i")
+    }
+    terminalSession = TerminalSession(shellPath, cwd, args, env, TRANSCRIPT_ROWS, client)
+    Log.i(TAG, "session created: shell=$shellPath argv=" + args.joinToString(" "))
+    return true
+  }
+
+  /** True when the snapshot bash can be exec'd directly (probe one-shot). */
+  private fun canExecDirect(bash: File, env: Map<String, String>): Boolean {
     return try {
-      fun build(argv: List<String>): ProcessBuilder =
-        ProcessBuilder(argv).also { p ->
-          p.environment().putAll(engineManager.shellEnv())
-          p.environment()["PS1"] = "dsh:\\w$ "
-          p.redirectErrorStream(true)
-        }
-      val argv = listOf(bash.absolutePath, "-i")
-      // Same fallback as the engine: Android 15/16 and some OEM systems (Honor/Huawei, measured)
-      // forbid the app domain from exec'ing an app-data ELF directly (EACCES Permission denied);
-      // loading via /system/bin/linker64 matches the Android system-lib mechanism and always works.
-      val proc = try {
-        build(argv).start()
-      } catch (e: java.io.IOException) {
-        Log.w(TAG, "console: direct exec denied, falling back to linker64: " + e.message)
-        build(listOf("/system/bin/linker64") + argv).start()
-      }
-      process = proc
-      val reader = Thread {
-        try {
-          proc.inputStream.bufferedReader().use { r ->
-            val sb = StringBuilder()
-            while (true) {
-              val c = r.read()
-              if (c < 0) break
-              // Collapse \r to \n (output carries CR without PTY); ignore bell (avoids UI noise).
-              if (c == '\r'.code) {
-                sb.append('\n')
-              } else if (c != '\u0007'.code) {
-                sb.append(c.toChar())
-              }
-              // Line buffering: small output (echo etc.) must not wait for the 4096 threshold —
-              // on-device measurement showed whole-block buffering stalls output until the next chunk/EOF.
-              if (c == '\n'.code || sb.length >= 4096) {
-                val chunk = sb.toString()
-                sb.setLength(0)
-                listener.onOutput(chunk)
-              }
-            }
-            if (sb.isNotEmpty()) listener.onOutput(sb.toString())
-          }
-        } catch (t: Throwable) {
-          if (!closed) Log.w(TAG, "console reader ended: " + (t.message ?: t.javaClass.simpleName))
-        }
-        // destroy() race: after bash closes stdout on SIGTERM (read hits EOF) the process may not have
-        // fully exited yet — exitValue() then throws IllegalThreadStateException (measured when the app
-        // is killed). Report as exited, or mark -1.
-        val code = try {
-          proc.exitValue()
-        } catch (_: IllegalThreadStateException) {
-          -1
-        }
-        listener.onExit(code)
-      }
-      reader.isDaemon = true
-      reader.start()
-      listener.onStatus("bash 已启动（快照 Termux 环境）")
+      val pb = ProcessBuilder(bash.absolutePath, "-c", "exit 0")
+      pb.environment().putAll(env)
+      pb.redirectErrorStream(true).start().waitFor()
       true
+    } catch (_: IOException) {
+      Log.w(TAG, "direct exec denied, using linker64")
+      false
     } catch (t: Throwable) {
-      LogCollector.log(TAG, "console start FAILED: " + (t.message ?: t.javaClass.simpleName))
-      listener.onStatus("控制台启动失败：" + (t.message ?: t.javaClass.simpleName))
+      Log.w(TAG, "exec probe failed, using linker64: " + (t.message ?: t.javaClass.simpleName))
       false
     }
   }
 
-  /** Write one command (appends \n). */
-  fun writeCommand(cmd: String) {
-    val proc = process ?: return
-    try {
-      proc.outputStream.write((cmd + "\n").toByteArray(Charsets.UTF_8))
-      proc.outputStream.flush()
-    } catch (t: Throwable) {
-      Log.w(TAG, "console write failed: " + (t.message ?: t.javaClass.simpleName))
-    }
-  }
-
   /** Terminate the session (Activity destroyed). */
-  fun destroy() {
-    closed = true
-    process?.destroy()
-    process = null
+  fun finish() {
+    terminalSession?.finishIfRunning()
+    terminalSession = null
   }
 
   companion object {
     private const val TAG = "dsh-console"
+    private const val TRANSCRIPT_ROWS = 2000
   }
 }

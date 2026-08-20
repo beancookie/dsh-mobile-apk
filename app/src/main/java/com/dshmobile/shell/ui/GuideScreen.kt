@@ -1,12 +1,9 @@
 package com.dsharnessmobile.shell.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,25 +18,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.dsharnessmobile.shell.AppPrefs
 import com.dsharnessmobile.shell.R
 import com.dsharnessmobile.shell.ui.theme.splashBrush
 
@@ -50,7 +44,8 @@ import com.dsharnessmobile.shell.ui.theme.splashBrush
  *
  * 浅色卡片式布局：渐变背景 + 居中圆角卡片（限宽，平板不拉宽）。
  * 引擎就绪后不再自动跳进 WebView——主按钮变为「进入」由用户主动进入；
- * 失败时主按钮为「重试」。engine.log 摘要默认折叠，点击展开。
+ * 失败时主按钮为「重试」。运行日志已移至设置页。
+ * 文案随应用语言（AppPrefs）切换，背景深浅随应用主题。
  */
 @Composable
 fun GuideScreen(
@@ -58,25 +53,38 @@ fun GuideScreen(
   progressBarVisible: Boolean,
   progressText: String,
   crashBanner: String?,
-  logSummary: String?,
   engineReady: Boolean,
   onEnterWeb: () -> Unit,
-  onOpenConsole: () -> Unit,
   onRetry: () -> Unit,
-  onUpdate: () -> Unit,
+  onOpenSettings: () -> Unit,
 ) {
   Box(
     modifier = Modifier
       .fillMaxSize()
-      .background(brush = splashBrush())
+      .background(brush = splashBrush(dark = AppPrefs.isDark(LocalContext.current)))
       .systemBarsPadding(),
     contentAlignment = Alignment.Center,
   ) {
+    // 左上角设置入口：无边框软底 pill（与渐变背景和谐融合）。
     Surface(
-      shape = RoundedCornerShape(20.dp),
+      onClick = onOpenSettings,
+      shape = RoundedCornerShape(50),
+      color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .padding(start = 16.dp, top = 12.dp),
+    ) {
+      Text(
+        text = stringResource(R.string.guide_open_settings),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+      )
+    }
+    Surface(
+      shape = RoundedCornerShape(24.dp),
       color = MaterialTheme.colorScheme.surface,
-      tonalElevation = 2.dp,
-      shadowElevation = 8.dp,
+      tonalElevation = 1.dp,
       modifier = Modifier
         .padding(24.dp)
         .widthIn(max = 480.dp)
@@ -85,13 +93,13 @@ fun GuideScreen(
       Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-          .padding(horizontal = 24.dp, vertical = 28.dp)
+          .padding(horizontal = 28.dp, vertical = 32.dp)
           .verticalScroll(rememberScrollState()),
       ) {
         val context = LocalContext.current
         val density = LocalDensity.current
         val logo = remember {
-          val sizePx = with(density) { 72.dp.toPx() }.toInt()
+          val sizePx = with(density) { 84.dp.toPx() }.toInt()
           context.getDrawable(R.drawable.icon)?.toBitmap(sizePx, sizePx)?.asImageBitmap()
         }
         logo?.let {
@@ -99,21 +107,21 @@ fun GuideScreen(
             bitmap = it,
             contentDescription = null,
             modifier = Modifier
-              .size(72.dp)
-              .clip(RoundedCornerShape(18.dp)),
+              .size(84.dp)
+              .clip(RoundedCornerShape(22.dp)),
           )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
         Text(
-          text = "DeepSeek Harness",
+          text = stringResource(R.string.guide_title),
           style = MaterialTheme.typography.headlineSmall,
           fontWeight = FontWeight.Bold,
           color = MaterialTheme.colorScheme.onSurface,
         )
         crashBanner?.let { banner ->
-          Spacer(Modifier.height(12.dp))
+          Spacer(Modifier.height(14.dp))
           Surface(
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.errorContainer,
             modifier = Modifier.fillMaxWidth(),
           ) {
@@ -121,19 +129,19 @@ fun GuideScreen(
               text = banner,
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onErrorContainer,
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             )
           }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         Text(
           text = engineStatusText,
-          style = MaterialTheme.typography.bodyLarge,
-          color = MaterialTheme.colorScheme.onSurface,
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           textAlign = TextAlign.Center,
         )
         if (progressBarVisible) {
-          Spacer(Modifier.height(14.dp))
+          Spacer(Modifier.height(16.dp))
           LinearProgressIndicator(
             color = MaterialTheme.colorScheme.primary,
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -144,7 +152,7 @@ fun GuideScreen(
           )
         }
         if (progressText.isNotEmpty()) {
-          Spacer(Modifier.height(8.dp))
+          Spacer(Modifier.height(10.dp))
           Text(
             text = progressText,
             style = MaterialTheme.typography.bodySmall,
@@ -152,76 +160,34 @@ fun GuideScreen(
             textAlign = TextAlign.Center,
           )
         }
-        logSummary?.let { summary ->
-          Spacer(Modifier.height(16.dp))
-          // 日志默认折叠：内容变化时重置回折叠态，点击标题行展开/收起。
-          var logExpanded by remember(summary) { mutableStateOf(false) }
-          Surface(
-            onClick = { logExpanded = !logExpanded },
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "运行日志",
-                  style = MaterialTheme.typography.labelLarge,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  modifier = Modifier.weight(1f),
-                )
-                Text(
-                  text = if (logExpanded) "收起 ▴" else "展开 ▾",
-                  style = MaterialTheme.typography.labelMedium,
-                  color = MaterialTheme.colorScheme.primary,
-                )
-              }
-              AnimatedVisibility(visible = logExpanded) {
-                Text(
-                  text = summary,
-                  style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  modifier = Modifier.padding(top = 8.dp),
-                )
-              }
-            }
-          }
-        }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(28.dp))
         // 主操作全宽：引擎就绪 → 进入 Web UI；未就绪/失败 → 重试。
         if (engineReady) {
           Button(
             onClick = onEnterWeb,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
               .fillMaxWidth()
-              .height(48.dp),
-          ) { Text("进入 DeepSeek Harness") }
+              .height(52.dp),
+          ) {
+            Text(
+              text = stringResource(R.string.guide_enter),
+              style = MaterialTheme.typography.titleSmall,
+            )
+          }
         } else {
           Button(
             onClick = onRetry,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
               .fillMaxWidth()
-              .height(48.dp),
-          ) { Text("重试") }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-          OutlinedButton(
-            onClick = onOpenConsole,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-              .weight(1f)
-              .height(44.dp),
-          ) { Text("打开控制台") }
-          OutlinedButton(
-            onClick = onUpdate,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-              .weight(1f)
-              .height(44.dp),
-          ) { Text("检查更新", maxLines = 1) }
+              .height(52.dp),
+          ) {
+            Text(
+              text = stringResource(R.string.guide_retry),
+              style = MaterialTheme.typography.titleSmall,
+            )
+          }
         }
       }
     }
