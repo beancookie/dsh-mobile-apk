@@ -5,6 +5,7 @@ local.properties
 snapshot/
 app/src/main/assets/snapshot.tar.xz
 app/src/main/assets/snapshot-*.tar.xz
+app/src/main/assets/snapshot.sha256
 # 敏感数据（安全审计 2026-08-14）
 *.credentials.yaml
 token*

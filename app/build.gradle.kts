@@ -1,5 +1,6 @@
 import java.io.BufferedInputStream
 import java.io.FileInputStream
+import java.security.MessageDigest
 import java.util.Properties
 import org.tukaani.xz.XZInputStream
 
@@ -16,12 +17,16 @@ plugins {
   id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// 快照 ABI（构建属性/环境变量，默认 x86_64）：决定打进 APK 的快照。
+// 快照 ABI（构建属性/环境变量，默认 arm64）：决定打进 APK 的快照。
 // 用法：./gradlew assembleRelease -PsnapshotAbi=x86_64|arm64
-val snapshotAbi: String = providers.gradleProperty("snapshotAbi")
-  .orElse(providers.environmentVariable("SNAPSHOT_ABI"))
-  .orElse("x86_64")
-  .get()
+// 真机均为 arm64，默认 arm64 可防「不带 flag 打出 x86_64 APK、真机直接崩」；模拟器请显式 -PsnapshotAbi=x86_64。
+val snapshotAbiArg: String? = providers.gradleProperty("snapshotAbi").orNull
+  ?: providers.environmentVariable("SNAPSHOT_ABI").orNull
+val snapshotAbi: String = (snapshotAbiArg ?: "arm64").also {
+  if (snapshotAbiArg == null) {
+    logger.warn("⚠ 未指定 -PsnapshotAbi，默认使用 arm64（真机架构）；x86_64 模拟器请显式传 -PsnapshotAbi=x86_64")
+  }
+}
 
 android {
   namespace = "com.dsharnessmobile.shell"
@@ -187,6 +192,27 @@ fun verifySnapshotAbi(file: File) {
   }
 }
 
+/**
+ * 把实际打进 APK 的快照指纹写入 assets/snapshot.sha256（EngineManager.snapshotFresh 的重解压依据）。
+ * 关键修复：此前指纹是仓库里固定的旧常量，arm64/x86_64 APK 指纹相同 → 设备端永远判定
+ * 「快照未变」→ 不重解压 → 换 ABI 的 APK 装上去也保留旧 ABI 的 usr/bin/bash（EM_X86_64 一直报）。
+ * 现在指纹 = 内嵌快照的真实 SHA-256，ABI 切换必然触发设备重解压（与 CI 的 sha256sum > snapshot.sha256 对齐）。
+ */
+fun writeSnapshotFingerprint(file: File) {
+  val md = MessageDigest.getInstance("SHA-256")
+  BufferedInputStream(FileInputStream(file), 1 shl 16).use { input ->
+    val buf = ByteArray(1 shl 16)
+    while (true) {
+      val n = input.read(buf)
+      if (n < 0) break
+      md.update(buf, 0, n)
+    }
+  }
+  val hex = md.digest().joinToString("") { "%02x".format(it) }
+  file("src/main/assets/snapshot.sha256").writeText(hex)
+  logger.lifecycle("> snapshot 指纹: $hex")
+}
+
 val stageSnapshot = tasks.register("stageSnapshot") {
   doFirst {
     when {
@@ -194,12 +220,14 @@ val stageSnapshot = tasks.register("stageSnapshot") {
         snapshotAbiFile.copyTo(snapshotPlainFile, overwrite = true)
         logger.lifecycle("> snapshot ABI: ${snapshotAbi}（${snapshotAbiFile.length()} bytes）")
         verifySnapshotAbi(snapshotPlainFile)
+        writeSnapshotFingerprint(snapshotPlainFile)
       }
       snapshotPlainFile.exists() -> {
         logger.warn(
           "缺少 snapshot/snapshot-${snapshotAbi}.tar.xz，使用现有 snapshot.tar.xz（按 -PsnapshotAbi=$snapshotAbi 校验内容）",
         )
         verifySnapshotAbi(snapshotPlainFile)
+        writeSnapshotFingerprint(snapshotPlainFile)
       }
       else -> throw GradleException(
         "缺少运行时快照 snapshot/snapshot-${snapshotAbi}.tar.xz —— " +

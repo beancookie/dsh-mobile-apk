@@ -2,6 +2,7 @@ package com.dsharnessmobile.shell
 
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.os.Build
 import android.os.Environment
 import android.util.Log
 import java.io.File
@@ -50,12 +51,40 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * Whether the snapshot is extracted and matches the embedded version: node exists + fingerprint match.
    * Upgrade lesson (v0.10.5→v0.10.6): engineReady only checked node existence, so an upgrade never
    * re-extracted → old plugins kept running (injection-guard fixes etc. never took effect).
+   *
+   * ABI self-heal (v0.12.4): the fingerprint alone cannot detect a lingering extraction from a
+   * different-ABI APK (an x86_64 APK's usr/ surviving after an arm64 install — the ELF stays
+   * EM_X86_64 and bash fails with "Exec format error"). Always verify the extracted bash's
+   * e_machine against the device ABIs; on mismatch force a re-extraction of the embedded snapshot.
    */
   fun snapshotFresh(): Boolean {
     if (!nodeBin.exists()) return false
     val fp = bundledFingerprint()
     if (fp.isEmpty()) return true // no fingerprint file (legacy build): don't force a re-extract
-    return fingerprintFile().exists() && fingerprintFile().readText().trim() == fp
+    if (!(fingerprintFile().exists() && fingerprintFile().readText().trim() == fp)) return false
+    if (!extractedAbiMatchesDevice()) {
+      Log.w(TAG, "snapshotFresh: extracted ELF ABI mismatches device — forcing re-extract")
+      return false
+    }
+    return true
+  }
+
+  /** e_machine of the extracted usr/bin/bash matches one of this device's ABIs (EM_AARCH64=183, EM_X86_64=62). */
+  private fun extractedAbiMatchesDevice(): Boolean {
+    val bash = File(usrDir, "bin/bash")
+    if (!bash.exists()) return false
+    val machine = try {
+      val buf = ByteArray(20)
+      java.io.DataInputStream(java.io.FileInputStream(bash)).use { it.readFully(buf) }
+      buf
+    } catch (_: Exception) {
+      return false
+    }
+    if (machine[0] != 0x7f.toByte() || machine[1] != 0x45.toByte()) return false // not an ELF
+    val m = (machine[18].toInt() and 0xff) or ((machine[19].toInt() and 0xff) shl 8)
+    val arm64Device = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" || it == "arm64" }
+    val x86_64Device = Build.SUPPORTED_ABIS.any { it == "x86_64" }
+    return (arm64Device && m == 183) || (x86_64Device && m == 62)
   }
 
   /**
