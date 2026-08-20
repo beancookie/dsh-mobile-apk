@@ -61,17 +61,22 @@ mkdir -p snapshot
 cp snapshot-x86_64.tar.xz snapshot/
 cp snapshot-arm64.tar.xz snapshot/
 
-# 2. Build (ABI is explicit; fails loudly when the snapshot is missing)
-./gradlew assembleDebug -PsnapshotAbi=x86_64      # or arm64
+# 2. Build (defaults to arm64 for real devices; x86_64 emulator must be explicit)
+./gradlew assembleDebug                          # arm64 by default
+./gradlew assembleDebug -PsnapshotAbi=x86_64     # emulator
 ./gradlew assembleRelease -PsnapshotAbi=arm64
 # output: app/build/outputs/apk/{debug,release}/app-{debug,release}.apk
 ```
 
 > **💡 Notes**
 >
-> - `-PsnapshotAbi` selects which snapshot is embedded (default `x86_64`); the build copies
->   `snapshot/snapshot-<abi>.tar.xz` to the packaged `snapshot.tar.xz` and rebuilds on ABI switches,
->   preventing mislabeled releases.
+> - `-PsnapshotAbi` selects which snapshot is embedded (**default `arm64`**, the real-device
+>   architecture; pass `-PsnapshotAbi=x86_64` for emulators). The build copies
+>   `snapshot/snapshot-<abi>.tar.xz` to the packaged `snapshot.tar.xz` and verifies the embedded
+>   snapshot's ELF e_machine matches the requested ABI (build fails on mismatch).
+> - Each build writes the staged snapshot's real SHA-256 to `snapshot.sha256`; the app uses it to
+>   force a re-extraction whenever the embedded snapshot's ABI/version changes (no more lingering
+>   wrong-ABI runtimes, including an x86_64 snapshot accidentally installed on an arm64 device).
 > - Release signing: local `keystore.properties` (gitignored) or CI environment variables; if the key
 >   is absent the APK is built unsigned without failing.
 
@@ -79,7 +84,8 @@ cp snapshot-arm64.tar.xz snapshot/
 
 Pushing a `v*` tag (or a manual `workflow_dispatch`) triggers [`.github/workflows/release.yml`](.github/workflows/release.yml):
 
-1. Pulls `snapshot-x86_64.tar.xz` from the latest existing Release, then builds the signed APK;
+1. Pulls `snapshot-arm64.tar.xz` + `snapshot-x86_64.tar.xz` from the latest Release and builds a
+   signed APK for each ABI (dual-ABI distribution);
 2. Generates `MANIFEST.txt` (sha256 + categorized path + size) and release notes from git log;
 3. Creates/updates a GitHub Release with APK, snapshot, MANIFEST and notes.
 
@@ -114,7 +120,7 @@ The bridge decouples the APK from the dsh version: pages feature-detect on `andr
    atomically swaps `usr` → `usr-old` → new `usr`, then kills the old engine — the watchdog
    restarts it from the new runtime.
 
-> **Test trigger**: `adb shell am start -n com.dshmobile.shell/.MainActivity -a com.dshmobile.shell.action.UPDATE`
+> **Test trigger**: `adb shell am start -n com.dsharnessmobile.shell/.MainActivity -a com.dsharnessmobile.shell.action.UPDATE`
 > status is written to `files/update-status.txt`. Test server: `node scripts/snapshot-server.mjs`.
 
 ## 🔐 Permissions
@@ -131,8 +137,8 @@ SAF picking needs no permission.
 
 - **Dual-ABI releases**: `x86_64` is verified end-to-end (MuMu/real device); `arm64-v8a` is assembled
   from the official Termux aarch64 repo (see [docs/design.md](docs/design.md) §ABI).
-- Pick the ABI at build time with `-PsnapshotAbi=<abi>`; each APK embeds its snapshot, so APKs are
-  arch-specific.
+- Pick the ABI at build time with `-PsnapshotAbi=<abi>` (default `arm64`); each APK embeds its
+  snapshot, so APKs are arch-specific.
 - A 16KB-page build must be produced on a 16KB device.
 
 ## 📄 License

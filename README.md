@@ -61,16 +61,20 @@ mkdir -p snapshot
 cp snapshot-x86_64.tar.xz snapshot/
 cp snapshot-arm64.tar.xz snapshot/
 
-# 2. 构建（按 ABI 显式指定，缺快照会构建失败并提示）
-./gradlew assembleDebug -PsnapshotAbi=x86_64      # 或 arm64
+# 2. 构建（默认 arm64 真机架构；x86_64 模拟器需显式指定；缺快照会构建失败并提示）
+./gradlew assembleDebug                          # 默认 arm64
+./gradlew assembleDebug -PsnapshotAbi=x86_64     # 模拟器显式 x86_64
 ./gradlew assembleRelease -PsnapshotAbi=arm64
 # 产物: app/build/outputs/apk/{debug,release}/app-{debug,release}.apk
 ```
 
 > **💡 说明**
 >
-> - `-PsnapshotAbi` 决定打进 APK 的快照（默认 `x86_64`）；构建时自动把
->   `snapshot/snapshot-<abi>.tar.xz` 复制为打包用的 `snapshot.tar.xz`，ABI 切换时自动重打包，防止错标。
+> - `-PsnapshotAbi` 决定打进 APK 的快照（**默认 `arm64`**，真机架构；模拟器请显式
+>   `-PsnapshotAbi=x86_64`）。构建时自动把 `snapshot/snapshot-<abi>.tar.xz` 复制为打包用的
+>   `snapshot.tar.xz`，并校验内嵌快照的 ELF e_machine 与 ABI 一致（不符即构建失败）。
+> - 每次构建把内嵌快照的真实 SHA-256 写入 `snapshot.sha256`；设备据此在快照 ABI/版本变化时
+>   自动重解压，杜绝残留错误 ABI 的运行时（也自愈误装 x86_64 快照到 arm64 设备的场景）。
 > - Release 签名：本地 `keystore.properties`（不入库）或 CI 环境变量注入；密钥缺失时产出未签名 APK，
 >   不阻断构建。
 
@@ -78,7 +82,8 @@ cp snapshot-arm64.tar.xz snapshot/
 
 推送 `v*` tag（或手动 `workflow_dispatch`）即触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
 
-1. 从本仓库最新 Release 取 `snapshot-x86_64.tar.xz` → 构建签名 APK；
+1. 从本仓库最新 Release 下载 `snapshot-arm64.tar.xz` + `snapshot-x86_64.tar.xz`，
+   按 ABI 各构建一个签名 APK（双 ABI 分发）；
 2. 生成 `MANIFEST.txt`（sha256 + 分类路径 + 字节数）与基于 git log 的发布说明；
 3. 创建/更新 GitHub Release，附 APK、快照、MANIFEST、notes。
 
@@ -129,7 +134,7 @@ SAF 选择无需权限。
 
 - **双 ABI 分发**：`x86_64` 快照已端到端验证（MuMu/真机）；`arm64-v8a` 快照由官方 Termux
   aarch64 仓库组装（见 [docs/design.md](docs/design.md) §ABI）。
-- 构建时用 `-PsnapshotAbi=<abi>` 选定；APK 内含快照，与架构绑定。
+- 构建时用 `-PsnapshotAbi=<abi>` 选定（默认 `arm64`）；APK 内含快照，与架构绑定。
 - 16KB 页构建需在 16KB 设备上产出。
 
 ## 📄 License
